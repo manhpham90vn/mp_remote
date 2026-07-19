@@ -1,0 +1,35 @@
+# Remote Game Control — Tài liệu thiết kế
+
+Phần mềm điều khiển game từ xa. Mỗi OS **một app duy nhất** (kiểu AnyDesk) chứa cả hai
+vai trò: `client.exe --serve` = host (máy chạy game), `client.exe --connect ip:port` = client.
+
+## Cấu trúc & build
+
+```
+core/            phần dùng chung giữa các OS (protocol, thuần C++20)
+client/windows/  app Windows (một exe: host + client)
+docs/            tài liệu
+```
+
+Build (CMake + Ninja — hoặc mở folder bằng Visual Studio):
+
+```
+cmake --preset x64-debug && cmake --build --preset x64-debug
+→ out/build/x64-debug/client/windows/client.exe
+```
+
+## Mục lục
+
+| Tài liệu | Nội dung |
+|----------|----------|
+| [01-architecture.md](01-architecture.md) | Kiến trúc tổng thể, pipeline, mục tiêu hiệu năng |
+| [02-agent.md](02-agent.md) | Vai trò Agent (host): capture → encode → gửi |
+| [03-client.md](03-client.md) | Vai trò Client: nhận → decode → render → input |
+| [04-protocol.md](04-protocol.md) | Giao thức mạng UDP |
+| [05-roadmap.md](05-roadmap.md) | Lộ trình giai đoạn + trạng thái |
+| [06-phase3-transport.md](06-phase3-transport.md) | Thiết kế chi tiết GĐ3 (transport) |
+
+## Trạng thái
+
+GĐ0 capture ✅ · GĐ1 encode (NVENC/MF) ✅ · GĐ2 loopback (~3.5 ms) ✅ ·
+GĐ3 transport 🔶 (thiết kế xong, `core` đã có Wire) · GĐ4 input ⬜

@@ -1,0 +1,41 @@
+# ---- Build output (CMake presets: out/build/<preset>) ----
+out/
+build/
+
+# ---- CMake (phong khi configure nham in-source / file cuc bo may) ----
+CMakeUserPresets.json
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+
+# ---- IDE / tool cache ----
+.vs/
+.vscode/
+.cache/
+*.user
+
+# ---- Compiled / linker artifacts (neu roi vai ra ngoai out/) ----
+*.obj
+*.o
+*.exe
+*.dll
+*.lib
+*.pdb
+*.ilk
+*.log
+
+# ---- Output debug cua chuong trinh (--save, --encode) ----
+*.bmp
+*.h264
+*.hevc
+*.mp4
+
+# ---- Thu vien ngoai (submodule duoc track rieng) ----
+third_party/*
+!third_party/nvenc-13.0
+
+# ---- OS ----
+Thumbs.db
+Desktop.ini
+.DS_Store
