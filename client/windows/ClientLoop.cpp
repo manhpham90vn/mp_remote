@@ -178,7 +178,19 @@ int RunClient(const ClientOptions& opt) {
                         if (!decoder) { failed.store(true); break; }
                     }
                     if (f->idr) session.CancelKeyframeRequest();
-                    if (!decoder->Decode(f->nal.data(), f->nal.size(), f->timestampUs)) {
+                    // CHAN DOAN: Decode() goi RenderNV12 dong bo ben trong (qua onDecoded) -
+                    // ca decode+render deu chan luong Recv nay, tam thoi khong recvfrom duoc.
+                    // Do gio o day de xac nhan/loai tru gia thuyet "cham GPU/driver lam
+                    // Reassembler timeout nham thanh mat goi" truoc khi tach thread.
+                    const uint64_t decStartUs = QpcUs();
+                    const bool decodeOk = decoder->Decode(f->nal.data(), f->nal.size(), f->timestampUs);
+                    const uint64_t decMs = (QpcUs() - decStartUs) / 1000;
+                    if (decMs > 20) {
+                        std::printf("[Client] CANH BAO: Decode+Render 1 frame mat %llu ms"
+                                    " (bat thuong - co the la nguyen nhan gay 'mat goi' gia)\n",
+                                    (unsigned long long)decMs);
+                    }
+                    if (!decodeOk) {
                         // Frame loi (hiem): coi nhu mat — xin IDR lam lai tu dau.
                         session.RequestKeyframe();
                     }
