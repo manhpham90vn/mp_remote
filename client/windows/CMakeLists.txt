@@ -24,6 +24,8 @@ add_executable(client
     NetInfo.cpp
     AgentLoop.cpp
     ClientLoop.cpp
+    InputCapture.cpp
+    InputInjector.cpp
     NetTest.cpp
 )
 

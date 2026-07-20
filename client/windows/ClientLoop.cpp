@@ -20,9 +20,12 @@
 #include <atomic>
 #include <cstdio>
 #include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include "GpuSelect.h"
+#include "InputCapture.h"
 #include "IVideoDecoder.h"
 #include "Renderer.h"
 #include "TimeUs.h"
@@ -57,7 +60,10 @@ int RunClient(const ClientOptions& opt) {
 
     UdpSocket sock;
     if (!sock.Open(0)) return 1; // port ngau nhien
-    sock.SetRecvTimeout(100);
+    // GD4: 10ms thay vi 100ms. Input duoc gom va gui trong Tick cua vong Recv,
+    // nen timeout recvfrom chinh la tran do tre input khi man hinh dang tinh
+    // (khong co goi video nao danh thuc vong lap). 100 wakeup/s la khong dang ke.
+    sock.SetRecvTimeout(10);
     std::printf("[Client] Ket noi toi %s ...\n", opt.server.ToString().c_str());
 
     // --- Chia se giua thread Recv va thread Main ---
@@ -66,6 +72,13 @@ int RunClient(const ClientOptions& opt) {
     std::atomic<uint32_t> negW{0}, negH{0}; // kich thuoc dam phan — main tao renderer
     Renderer renderer;
     std::atomic<bool> rendererReady{false};
+
+    // GD4: InputCapture chay tren luong Main (WndProc), ClientSession tren luong
+    // Recv. Noi hai ben bang mot hang doi co khoa - khoa chi giu vai chuc nano
+    // giay quanh push/swap, khong nam tren duong nong cua video.
+    InputCapture input;
+    std::mutex inputMutex;
+    std::vector<rgc::InputEvent> inputQueue;
 
     std::thread recv([&] {
         std::unique_ptr<rgc::Reassembler> reasm; // tao sau khi biet fps dam phan
@@ -168,6 +181,16 @@ int RunClient(const ClientOptions& opt) {
                     session.RequestKeyframe();
             }
 
+            // Vet input do luong Main gom duoc -> ClientSession danh seq, Tick gui.
+            {
+                std::vector<rgc::InputEvent> batch;
+                {
+                    std::lock_guard<std::mutex> lk(inputMutex);
+                    batch.swap(inputQueue);
+                }
+                for (const auto& e : batch) session.QueueInput(e);
+            }
+
             session.Tick(now);
             if (session.state() == rgc::ClientSession::State::Dead) break;
 
@@ -208,6 +231,19 @@ int RunClient(const ClientOptions& opt) {
                 break;
             }
             if (opt.saveBmp) renderer.RequestDumpBmp("client.bmp");
+            if (opt.sendInput) {
+                renderer.SetMessageHook([&](HWND h, UINT m, WPARAM w, LPARAM l) {
+                    return input.OnMessage(h, m, w, l);
+                });
+                if (input.Attach(renderer.Hwnd(), [&](const rgc::InputEvent& e) {
+                        std::lock_guard<std::mutex> lk(inputMutex);
+                        inputQueue.push_back(e);
+                    })) {
+                    input.SetEnabled(true);
+                }
+            } else {
+                std::printf("[Client] CHI XEM - khong gui input (--noinput).\n");
+            }
             rendererReady.store(true, std::memory_order_release);
         }
         if (renderer.Closed()) { quit.store(true); break; }
@@ -215,6 +251,8 @@ int RunClient(const ClientOptions& opt) {
     }
 
     quit.store(true);
+    input.Detach(); // tha chuot/con tro TRUOC khi huy cua so preview
+    renderer.SetMessageHook(nullptr);
     recv.join();
     SetConsoleCtrlHandler(CtrlHandler, FALSE);
     std::printf("[Client] Da dung.\n");

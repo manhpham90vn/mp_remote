@@ -15,6 +15,12 @@ inline constexpr size_t  kCommonHeaderSize = 8;
 inline constexpr size_t  kVideoHeaderSize  = 16;
 inline constexpr size_t  kMaxVideoPayload  = kMaxDatagram - kCommonHeaderSize - kVideoHeaderSize; // 1176
 
+inline constexpr size_t  kInputHeaderSize = 5;  // seq(u32) + count(u8)
+inline constexpr size_t  kInputEventSize  = 19; // evType+ts+a+b+state+absolute
+// Số event tối đa nhét vừa một datagram (thực tế gửi ít hơn nhiều).
+inline constexpr size_t  kMaxInputEvents =
+    (kMaxDatagram - kCommonHeaderSize - kInputHeaderSize) / kInputEventSize; // 62
+
 enum class Chan : uint8_t { Control = 0, Video = 1, Input = 2, Audio = 3 };
 
 enum class MsgType : uint8_t {
@@ -86,6 +92,34 @@ struct Reconfig {
     uint32_t bitrateBps;
 };
 
+// ---- Kênh input (GĐ4) ----
+enum class InputType : uint8_t {
+    Key         = 1, // a = mã phím ảo (VK), b = scancode (bit8 = phím mở rộng E0)
+    MouseMove   = 2, // absolute=1: a/b = toạ độ chuẩn hoá 0..65535 trong client rect
+                     // absolute=0: a/b = delta thô (dx/dy) từ Raw Input
+    MouseButton = 3, // a = MouseButton, b = 0
+    MouseWheel  = 4, // a = 0, b = delta (bội của 120), state bỏ qua
+};
+
+enum class MouseButton : uint8_t { Left = 1, Right = 2, Middle = 3, X1 = 4, X2 = 5 };
+
+// b của Key: scancode ở 8 bit thấp, bit8 = cờ E0 (phím mở rộng: mũi tên, Ctrl phải...).
+inline constexpr int32_t kScanExtended = 0x100;
+
+struct InputEvent {
+    InputType type = InputType::Key;
+    uint64_t  timestampUs = 0;
+    int32_t   a = 0;
+    int32_t   b = 0;
+    uint8_t   state = 0;    // 1 = nhấn/giữ, 0 = nhả. MouseMove/Wheel bỏ qua.
+    uint8_t   absolute = 0; // 1 = a/b là toạ độ tuyệt đối chuẩn hoá
+};
+
+// Event đổi TRẠNG THÁI: mất gói chứa nó gây kẹt phím → được gửi lặp (InputSender).
+inline constexpr bool IsStateEvent(InputType t) {
+    return t == InputType::Key || t == InputType::MouseButton;
+}
+
 struct VideoHeader {
     uint32_t frameId;
     uint64_t timestampUs;
@@ -113,6 +147,10 @@ size_t BuildRequestKeyframe(std::span<uint8_t> out, uint32_t sessionId);
 size_t BuildReconfig(std::span<uint8_t> out, uint32_t sessionId, const Reconfig& m);
 size_t BuildVideoPacket(std::span<uint8_t> out, uint32_t sessionId, const VideoHeader& vh,
                         bool idr, bool frameEnd, std::span<const uint8_t> payload);
+// `firstSeq` là seq của events[0]; event thứ i mang seq = firstSeq + i (§6).
+// Trả 0 nếu events rỗng, quá kMaxInputEvents, hoặc out thiếu chỗ.
+size_t BuildInputEvents(std::span<uint8_t> out, uint32_t sessionId, uint32_t firstSeq,
+                        std::span<const InputEvent> events);
 
 // ---- Parse. Trả về nullopt nếu gói ngắn/sai phiên bản. ----
 std::optional<CommonHeader> ParseCommonHeader(std::span<const uint8_t> datagram);
@@ -126,5 +164,9 @@ std::optional<Feedback> ParseFeedback(std::span<const uint8_t> payload);
 std::optional<Reconfig> ParseReconfig(std::span<const uint8_t> payload);
 std::optional<VideoPacketView> ParseVideoPacket(const CommonHeader& h,
                                                 std::span<const uint8_t> payload);
+// Giải mã batch input vào `out` (đủ chỗ cho kMaxInputEvents). Trả số event đã ghi
+// và đặt `firstSeq`; 0 nếu gói hỏng/rỗng/không khớp count.
+size_t ParseInputEvents(std::span<const uint8_t> payload, uint32_t& firstSeq,
+                        std::span<InputEvent> out);
 
 } // namespace rgc

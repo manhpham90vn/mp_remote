@@ -132,8 +132,15 @@ Gói input nhỏ, có thể gộp nhiều sự kiện trong một datagram để
 
 | Trường | Kiểu | Ý nghĩa |
 |--------|------|---------|
-| seq | u32 | Số thứ tự gói input, tăng dần. Agent phát hiện mất/đảo. |
-| count | u8 | Số event trong gói. |
+| seq | u32 | Số thứ tự của **event đầu tiên** trong gói; event thứ `i` mang seq `= seq + i`. |
+| count | u8 | Số event trong gói (≤ 62 để vừa một datagram). |
+
+> **seq gắn với EVENT, không gắn với gói.** Bản nháp v1 để seq là số thứ tự gói,
+> nhưng như vậy Agent không phân biệt được bản **gửi lặp** với thao tác mới (xem
+> "tin cậy nhẹ" bên dưới) — nhấn W một lần sẽ thành ba lần. Đánh seq theo từng
+> event thì cùng một trường lo được cả ba việc: khử trùng (`seq ≤ lastApplied` →
+> bỏ), đếm mất (nhảy seq), và chống đảo thứ tự (gói cũ về muộn → toàn seq cũ → bỏ
+> sạch, không tua ngược thao tác). Layout wire không đổi. Chi tiết: `07-phase4-input.md` §2.
 
 **Cấu trúc một event:**
 | Trường | Kiểu | Ý nghĩa |
@@ -141,14 +148,21 @@ Gói input nhỏ, có thể gộp nhiều sự kiện trong một datagram để
 | evType | u8 | `1=key`, `2=mouse_move`, `3=mouse_button`, `4=mouse_wheel`. |
 | timestampUs | u64 | Thời điểm phát sinh ở client. |
 | a | i32 | Tùy loại: key→vkCode; mouse_move→dx (hoặc x chuẩn hóa*65535); button→buttonId. |
-| b | i32 | Tùy loại: mouse_move→dy; wheel→delta; key/button→0. |
+| b | i32 | Tùy loại: key→**scancode** (bit8 = cờ E0, phím mở rộng); mouse_move→dy; wheel→delta; button→0. |
 | state | u8 | `1=down/pressed`, `0=up/released`; mouse_move bỏ qua. |
 | absolute | u8 | 1 nếu a/b là tọa độ tuyệt đối chuẩn hóa; 0 nếu delta tương đối. |
 
+> `b` = scancode là **bắt buộc**, không phải tùy chọn: game dùng DirectInput/Raw Input
+> đọc scancode chứ không đọc vkCode. Chỉ gửi vkCode thì gõ vào Notepad chạy tốt nhưng
+> vào game không có gì xảy ra (`07-phase4-input.md` §5).
+
 **Tin cậy nhẹ:** sự kiện **chuyển trạng thái** (key/button down/up) là quan trọng — mất
-event key-up gây "kẹt phím". Chính sách:
-- Agent theo dõi `seq`; nếu phát hiện lỗ hổng chuỗi ở event trạng thái → có thể xin gửi lại,
-  hoặc client **lặp lại các event trạng thái gần nhất** vài lần (đơn giản hơn, đủ tốt cho v1).
+event key-up gây "kẹt phím". Chính sách v1 (đã hiện thực):
+- Client **gửi lặp**: mỗi datagram kèm 8 event đã gửi gần nhất; khi hết event mới thì
+  phát lại đuôi thêm 2 lần cách nhau 25 ms (gói cuối cùng — thường chính là event nhả
+  phím — không có gói nào sau nó để bù). Agent khử trùng bằng seq nên lặp là vô hại.
+- Agent **nhả hết phím đang giữ** khi BYE/timeout/mất focus. Đây là lưới an toàn cuối:
+  gửi lặp chỉ giảm xác suất, không loại trừ được mất gói.
 - `mouse_move` tương đối thì mất một gói không nghiêm trọng (chỉ hụt chút chuyển động) →
   không cần tin cậy.
 

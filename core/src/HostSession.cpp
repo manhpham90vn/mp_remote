@@ -52,6 +52,12 @@ bool HostSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
         lastRecvUs_ = nowUs;
         if (cb_.onKeyframeRequest) cb_.onKeyframeRequest();
         return true;
+    case MsgType::InputEvent:
+        // Chỉ nhận input khi đang STREAMING: trước đó host chưa biết client là ai.
+        if (state() != State::Streaming || h->sessionId != sessionId()) return false;
+        lastRecvUs_ = nowUs;
+        input_.HandlePacket(payload, cb_.onInput);
+        return true;
     case MsgType::Feedback: // GĐ5 mới xử lý — v1 chỉ nuôi timeout
         if (state() == State::Idle || h->sessionId != sessionId()) return false;
         lastRecvUs_ = nowUs;
@@ -94,7 +100,8 @@ void HostSession::Disconnect() {
     state_.store(State::Idle, std::memory_order_release);
     sessionId_.store(0, std::memory_order_relaxed);
     clientId_ = 0;
-    if (cb_.onDisconnect) cb_.onDisconnect();
+    input_.Reset(); // client sau bắt đầu lại từ seq 0
+    if (cb_.onDisconnect) cb_.onDisconnect(); // caller nhả hết phím đang giữ
 }
 
 } // namespace rgc

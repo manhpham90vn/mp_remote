@@ -36,6 +36,7 @@
 #include "TimeUs.h"
 #include "AgentLoop.h"
 #include "ClientLoop.h"
+#include "InputInjector.h"
 #include "NetInfo.h"
 #include "NetTest.h"
 
@@ -117,7 +118,8 @@ static std::string Trim(const char* line) {
 
 // Man hinh chinh kieu AnyDesk khi chay khong tham so: hien dia chi may nay theo
 // tung card mang + chon vai tro. Sau moi phien (host/client) quay lai menu.
-static int RunMainMenu(uint16_t port, uint32_t fps, uint32_t bitrateMbps, bool saveBmp) {
+static int RunMainMenu(uint16_t port, uint32_t fps, uint32_t bitrateMbps, bool saveBmp,
+                       bool allowInput) {
     for (;;) {
         std::printf("\n==================================================\n");
         std::printf("  RemoteGame - stream & dieu khien ung dung tu xa\n");
@@ -148,6 +150,17 @@ static int RunMainMenu(uint16_t port, uint32_t fps, uint32_t bitrateMbps, bool s
             ao.port = port;
             ao.fps = fps;
             ao.bitrateMbps = bitrateMbps;
+            ao.allowInput = allowInput;
+            if (allowInput) {
+                // Chia se quyen dieu khien la viec he trong - hoi cho ro rang.
+                std::printf("Cho phep nguoi kia DIEU KHIEN chuot/ban phim cua ung dung nay?"
+                            " (Enter = co, n = chi cho xem): ");
+                char yn[16] = {};
+                if (std::fgets(yn, sizeof(yn), stdin)) {
+                    const std::string ans = Trim(yn);
+                    ao.allowInput = !(ans == "n" || ans == "N");
+                }
+            }
             RunAgent(target, ao);
             std::printf("\n(Da dung chia se - quay lai menu chinh.)\n");
             continue;
@@ -165,6 +178,7 @@ static int RunMainMenu(uint16_t port, uint32_t fps, uint32_t bitrateMbps, bool s
         }
         ClientOptions co;
         co.saveBmp = saveBmp;
+        co.sendInput = allowInput;
         if (!ParseNetAddr(addrStr, port, co.server)) {
             std::printf("Dia chi khong hop le: \"%s\" (vi du: 192.168.1.10 hoac 192.168.1.10:47777)\n",
                         addrStr.c_str());
@@ -193,6 +207,8 @@ int main(int argc, char** argv) {
     bool     doLoopback = false;
     bool     doServe = false;
     bool     doNetTest = false;
+    bool     allowInput = true;   // GD4: --noinput = chi xem, khong dieu khien
+    bool     doInjectTest = false; // GD4 dev: chi thu bom input, khong can mang
     bool     framesSet = false;
     int      targetFrames = 120;
     uint32_t fps = 60;
@@ -210,6 +226,8 @@ int main(int argc, char** argv) {
         else if (a == "--loopback") doLoopback = true;
         else if (a == "--serve")    doServe = true;
         else if (a == "--nettest")  doNetTest = true;
+        else if (a == "--noinput")  allowInput = false;
+        else if (a == "--injecttest") doInjectTest = true;
         else if (a == "--connect" && i + 1 < argc) connectAddr = argv[++i];
         else if (a == "--port")     port = next(47777);
         else if (a == "--frames") { targetFrames = (int)next(120); framesSet = true; }
@@ -230,16 +248,20 @@ int main(int argc, char** argv) {
             return 1;
         }
         co.saveBmp = saveBmp;
+        co.sendInput = allowInput;
         return RunClient(co);
     }
 
     // --- Khong tham so nao -> man hinh chinh kieu AnyDesk (chon vai tro) ---
-    if (targetExe.empty() && !doServe && !doEncode && !doLoopback)
-        return RunMainMenu(uint16_t(port), fps, bitrateMbps, saveBmp);
+    if (targetExe.empty() && !doServe && !doEncode && !doLoopback && !doInjectTest)
+        return RunMainMenu(uint16_t(port), fps, bitrateMbps, saveBmp, allowInput);
 
     // --- Tim cua so nguon cho cac mode can capture ---
     HWND target = ResolveTargetWindow(targetExe);
     if (!target) return targetExe.empty() ? 0 : 1;
+
+    // --- GD4 dev: kiem chung rieng duong bom input (khong qua mang) ---
+    if (doInjectTest) return InputInjector::SelfTest(target, "RemoteGame GD4 OK");
 
     // --- GD3: vai tro host (--serve) — AgentLoop tu chon GPU va chay vong mang ---
     if (doServe) {
@@ -247,6 +269,7 @@ int main(int argc, char** argv) {
         ao.port = uint16_t(port);
         ao.fps = fps;
         ao.bitrateMbps = bitrateMbps;
+        ao.allowInput = allowInput;
         return RunAgent(target, ao);
     }
 

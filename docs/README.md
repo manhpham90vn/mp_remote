@@ -28,8 +28,10 @@ cmake --preset x64-debug && cmake --build --preset x64-debug
 | [04-protocol.md](04-protocol.md) | Giao thức mạng UDP |
 | [05-roadmap.md](05-roadmap.md) | Lộ trình giai đoạn + trạng thái |
 | [06-phase3-transport.md](06-phase3-transport.md) | Thiết kế chi tiết GĐ3 (transport) |
+| [07-phase4-input.md](07-phase4-input.md) | Thiết kế chi tiết GĐ4 (input) |
 
 ## Trạng thái
 
 GĐ0 capture ✅ · GĐ1 encode (NVENC/MF) ✅ · GĐ2 loopback (~3.5 ms) ✅ ·
-GĐ3 transport 🔶 (thiết kế xong, `core` đã có Wire) · GĐ4 input ⬜
+GĐ3 transport ✅ (1 máy; chờ M3/M4 LAN) · GĐ4 input 🔶 (code + M1/M2 xong,
+chờ kiểm chứng 2 máy — xem 07 §9)

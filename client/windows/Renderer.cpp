@@ -50,6 +50,7 @@ struct Renderer::Impl {
     uint32_t vpSrcW = 0, vpSrcH = 0;    // kich thuoc nguon ma VP hien tai phuc vu
     uint32_t clientW = 0, clientH = 0;
     std::string dumpBmpPath;            // rong = khong dump
+    Renderer::MessageHook msgHook;      // chi doc/ghi tren luong message (main)
 
     ~Impl() {
         if (hwnd) DestroyWindow(hwnd);
@@ -57,6 +58,9 @@ struct Renderer::Impl {
 
     static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         auto* self = (Impl*)GetWindowLongPtrW(h, GWLP_USERDATA);
+        // GD4: InputCapture xem message truoc. Khi dang lai input di xa, no nuot
+        // ca phim/chuot (ke ca ESC) de nguoi dung go vao MAY KIA, khong phai day.
+        if (self && self->msgHook && self->msgHook(h, msg, wp, lp)) return 0;
         switch (msg) {
         case WM_CLOSE:
             if (self) self->closed.store(true);
@@ -227,6 +231,17 @@ void Renderer::RequestDumpBmp(const std::string& path) {
         std::lock_guard<std::mutex> lk(impl_->renderMutex);
         impl_->dumpBmpPath = path;
     }
+}
+
+void Renderer::SetMessageHook(MessageHook hook) {
+    if (impl_) impl_->msgHook = std::move(hook);
+}
+
+HWND Renderer::Hwnd() const { return impl_ ? impl_->hwnd : nullptr; }
+
+void Renderer::ClientSize(uint32_t& w, uint32_t& h) const {
+    w = impl_ ? impl_->clientW : 0;
+    h = impl_ ? impl_->clientH : 0;
 }
 
 void Renderer::Pump() {

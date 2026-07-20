@@ -6,6 +6,8 @@
 #include "rgc/Reassembler.h"
 #include "rgc/HostSession.h"
 #include "rgc/ClientSession.h"
+#include "rgc/InputSender.h"
+#include "rgc/InputReceiver.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -408,6 +410,125 @@ void TestSessions() {
     Check(!cliDead.empty(), "client bo cuoc khi host im lang");
 }
 
+// ---- GD4: input ----
+
+InputEvent MakeKey(int32_t vk, int32_t scan, bool down) {
+    InputEvent e;
+    e.type  = InputType::Key;
+    e.a     = vk;
+    e.b     = scan;
+    e.state = down ? 1 : 0;
+    return e;
+}
+
+// Wire: mot batch event di qua build/parse phai ve nguyen ven tung truong.
+void TestInputWireRoundtrip() {
+    std::printf("[M1] Wire input roundtrip...\n");
+    std::vector<InputEvent> in;
+    in.push_back(MakeKey('W', 0x11, true));
+    InputEvent mv;
+    mv.type = InputType::MouseMove; mv.a = -1234; mv.b = 5678; mv.absolute = 0;
+    in.push_back(mv);
+    InputEvent ab;
+    ab.type = InputType::MouseMove; ab.a = 65535; ab.b = 0; ab.absolute = 1;
+    in.push_back(ab);
+    InputEvent wh;
+    wh.type = InputType::MouseWheel; wh.b = -120;
+    in.push_back(wh);
+    for (auto& e : in) e.timestampUs = 0x0123456789ABCDEFull;
+
+    uint8_t buf[kMaxDatagram];
+    const size_t n = BuildInputEvents(buf, 0xCAFEBABE, 77, in);
+    Check(n > 0, "BuildInputEvents thanh cong");
+    const auto h = ParseCommonHeader(std::span<const uint8_t>(buf, n));
+    Check(h && h->type == MsgType::InputEvent && h->chan == Chan::Input, "header input dung");
+    Check(h && h->sessionId == 0xCAFEBABE, "sessionId giu nguyen");
+
+    InputEvent out[kMaxInputEvents];
+    uint32_t firstSeq = 0;
+    const size_t got = ParseInputEvents(PayloadOf(std::span<const uint8_t>(buf, n)),
+                                        firstSeq, out);
+    Check(got == in.size() && firstSeq == 77, "so event + firstSeq dung");
+    for (size_t i = 0; i < got && i < in.size(); ++i) {
+        Check(out[i].type == in[i].type && out[i].a == in[i].a && out[i].b == in[i].b &&
+              out[i].state == in[i].state && out[i].absolute == in[i].absolute &&
+              out[i].timestampUs == in[i].timestampUs, "event roundtrip nguyen ven");
+    }
+    // So am phai song sot (a = -1234) - loi kinh dien khi ep i32 qua u32.
+    Check(got >= 2 && out[1].a == -1234, "toa do am giu dung dau");
+}
+
+// Duong ong day du: sender -> (mo phong mat goi) -> receiver.
+// Yeu cau then chot: KHONG event nao bi ap dung hai lan, va gui lap phai bu
+// duoc goi mat (neu khong -> ket phim).
+void TestInputSenderReceiver() {
+    std::printf("[M1] Input sender/receiver: khu trung + bu goi mat...\n");
+    InputSender sender;
+    sender.SetSessionId(1234);
+    InputReceiver receiver;
+
+    std::vector<Datagram> wire;
+    auto send = [&](std::span<const uint8_t> d) { wire.emplace_back(d.begin(), d.end()); };
+
+    // 20 lan nhan/nha phim, moi lan Flush ngay (giong go phim thuc te).
+    std::vector<InputEvent> sentEvents;
+    uint64_t now = 0;
+    for (int i = 0; i < 20; ++i) {
+        const bool down = (i % 2) == 0;
+        const auto e = MakeKey('A' + (i / 2), 0x1E + (i / 2), down);
+        sender.Queue(e);
+        sentEvents.push_back(e);
+        now += 10'000;
+        sender.Flush(now, send);
+    }
+    // Vai vong khong co event moi -> sender phat lai duoi.
+    for (int i = 0; i < 4; ++i) { now += kInputRepeatIntervalUs; sender.Flush(now, send); }
+
+    // Bo 1/3 so datagram (mat goi nang hon thuc te nhieu).
+    std::vector<InputEvent> applied;
+    auto apply = [&](const InputEvent& e) { applied.push_back(e); };
+    size_t dropped = 0;
+    for (size_t i = 0; i < wire.size(); ++i) {
+        if (i % 3 == 1) { ++dropped; continue; }
+        receiver.HandlePacket(PayloadOf(wire[i]), apply);
+    }
+    Check(dropped > 0, "co gia lap mat goi");
+    Check(applied.size() == sentEvents.size(),
+          "moi event den dung mot lan du mat 1/3 goi (khong ket phim, khong lap)");
+    for (size_t i = 0; i < applied.size() && i < sentEvents.size(); ++i) {
+        Check(applied[i].a == sentEvents[i].a && applied[i].state == sentEvents[i].state,
+              "event dung thu tu va noi dung");
+    }
+    Check(receiver.stats().duplicates > 0, "co ban lap bi khu (dung la co gui lap)");
+    Check(receiver.stats().lost == 0, "khong mat event nao");
+}
+
+// Goi den dao thu tu khong duoc "tua nguoc" thao tac: gia su goi cu ve sau,
+// moi event trong do deu la seq cu -> phai bi bo het.
+void TestInputReorder() {
+    std::printf("[M1] Input dao thu tu...\n");
+    InputSender sender;
+    InputReceiver receiver;
+    std::vector<Datagram> wire;
+    auto send = [&](std::span<const uint8_t> d) { wire.emplace_back(d.begin(), d.end()); };
+
+    uint64_t now = 0;
+    for (int i = 0; i < 6; ++i) {
+        sender.Queue(MakeKey('A' + i, 0x1E + i, true));
+        now += 10'000;
+        sender.Flush(now, send);
+    }
+    std::vector<InputEvent> applied;
+    auto apply = [&](const InputEvent& e) { applied.push_back(e); };
+    // Nhan goi cuoi TRUOC, roi moi den cac goi truoc do.
+    receiver.HandlePacket(PayloadOf(wire.back()), apply);
+    const size_t afterNewest = applied.size();
+    for (size_t i = 0; i + 1 < wire.size(); ++i)
+        receiver.HandlePacket(PayloadOf(wire[i]), apply);
+    Check(applied.size() == afterNewest, "goi den tre khong ap dung lai event cu");
+    Check(applied.back().a == 'A' + 5, "trang thai cuoi la event moi nhat");
+}
+
 } // namespace
 
 int RunNetTest() {
@@ -420,6 +541,10 @@ int RunNetTest() {
     TestJoinMidStream();
     TestHeadTimeout();
     TestSessions();
+    std::printf("=== GD4 M1: self-test input (offline) ===\n");
+    TestInputWireRoundtrip();
+    TestInputSenderReceiver();
+    TestInputReorder();
     if (g_failures == 0) {
         std::printf("=== NETTEST PASS: moi kiem tra dat ===\n");
         return 0;

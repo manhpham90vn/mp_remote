@@ -7,6 +7,7 @@
 // gói Video caller tự đưa vào Reassembler rồi gọi NotifyVideoPacket để nuôi
 // timeout), byte ra qua callback `send`, thời gian bơm từ ngoài.
 // Toàn bộ chạy trên MỘT thread (thread Recv của client) — không khóa.
+#include "rgc/InputSender.h"
 #include "rgc/Wire.h"
 
 #include <cstdint>
@@ -54,6 +55,10 @@ public:
 
     void Tick(uint64_t nowUs);
 
+    // Xếp một event input để gửi (GĐ4). Chỉ có tác dụng khi đã STREAMING;
+    // Tick lo việc đóng gói, đánh seq và gửi lặp chống kẹt phím.
+    void QueueInput(const InputEvent& e);
+
     // Giữ cờ xin IDR: Tick phát REQUEST_KEYFRAME mỗi 250ms tới khi Cancel.
     void RequestKeyframe() { keyframeWanted_ = true; }
     void CancelKeyframeRequest() { keyframeWanted_ = false; }
@@ -72,6 +77,7 @@ private:
     void Die(const char* reason);
 
     ClientCallbacks cb_;
+    InputSender input_;
     State    state_ = State::Idle;
     uint32_t sessionId_ = 0;
     Hello    hello_{};

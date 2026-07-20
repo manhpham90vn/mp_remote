@@ -10,6 +10,7 @@ struct AgentOptions {
     uint16_t port = 47777;
     uint32_t fps = 60;
     uint32_t bitrateMbps = 20;
+    bool     allowInput = true; // GD4: cho client dieu khien (--noinput de tat)
 };
 
 // Chay agent phuc vu cua so `target` toi khi cua so dong / Ctrl+C / loi pipeline.

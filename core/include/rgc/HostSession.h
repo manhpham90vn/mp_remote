@@ -8,6 +8,7 @@
 //
 // Thread-model: HandlePacket/Tick chạy trên MỘT thread (Recv). state()/sessionId()
 // đọc được từ thread khác (thread encode hỏi "đã STREAMING chưa?") — atomic.
+#include "rgc/InputReceiver.h"
 #include "rgc/Wire.h"
 
 #include <atomic>
@@ -31,6 +32,10 @@ struct HostCallbacks {
     std::function<void()> onStart;           // nhận START → force IDR, bắt đầu đẩy video
     std::function<void()> onKeyframeRequest; // REQUEST_KEYFRAME từ client
     std::function<void()> onDisconnect;      // BYE hoặc timeout → đã quay về IDLE
+    // Event input đã khử trùng, đúng thứ tự (GĐ4). Caller bơm vào InputInjector.
+    // LƯU Ý: onDisconnect phải nhả hết phím/nút đang giữ — mất kết nối giữa lúc
+    // giữ phím mà không nhả sẽ kẹt phím ở máy host.
+    std::function<void(const InputEvent&)> onInput;
 };
 
 class HostSession {
@@ -46,6 +51,7 @@ public:
 
     State    state() const { return state_.load(std::memory_order_acquire); }
     uint32_t sessionId() const { return sessionId_.load(std::memory_order_relaxed); }
+    const InputReceiver::Stats& inputStats() const { return input_.stats(); }
 
 private:
     void SendHelloAck(uint64_t nowUs);
@@ -54,6 +60,7 @@ private:
 
     HostCallbacks cb_;
     StreamParams  offer_;
+    InputReceiver input_;
     std::atomic<State>    state_{State::Idle};
     std::atomic<uint32_t> sessionId_{0};
     uint32_t clientId_ = 0;

@@ -65,6 +65,12 @@ void ClientSession::NotifyVideoPacket(uint64_t nowUs) {
     if (state_ == State::Streaming) lastRecvUs_ = nowUs;
 }
 
+void ClientSession::QueueInput(const InputEvent& e) {
+    if (state_ != State::Streaming) return; // chưa có phiên → không có chỗ gửi
+    input_.SetSessionId(sessionId_);
+    input_.Queue(e);
+}
+
 void ClientSession::Tick(uint64_t nowUs) {
     switch (state_) {
     case State::Idle:
@@ -89,6 +95,9 @@ void ClientSession::Tick(uint64_t nowUs) {
         const size_t n = BuildPing(buf_, sessionId_, p);
         if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
     }
+
+    // Input đi trước keyframe: thao tác của người dùng nhạy cảm với trễ nhất.
+    if (state_ == State::Streaming && cb_.send) input_.Flush(nowUs, cb_.send);
 
     if (keyframeWanted_ && state_ == State::Streaming &&
         nowUs - lastKeyframeReqUs_ >= kKeyframeRetryUs) {

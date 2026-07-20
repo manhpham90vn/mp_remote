@@ -118,11 +118,42 @@ client/windows: `UdpSocket.h/.cpp`, `NetInfo.h/.cpp`, `AgentLoop.h/.cpp`,
 Chạy: máy host `client.exe` → `[s]` (hoặc `client.exe game.exe --serve [--port N]`);
 máy xem `client.exe` → gõ `ip[:port]` (hoặc `client.exe --connect ip[:port]`).
 
-## Giai đoạn 4 — Input (RỦI RO CAO thứ hai)
-- ⬜ InputCapture ở client (Raw Input) → INPUT_EVENT.
-- ⬜ InputInjector ở Agent: `SendInput` trước; ánh xạ tọa độ chuẩn hóa → pixel cửa sổ.
-- ⬜ Thử với **game thật**; nếu bị bỏ qua → thử ViGEm (gamepad) / Interception.
-- **Tiêu chí xong**: điều khiển được ít nhất một game mục tiêu bằng chuột/phím từ client.
+## Giai đoạn 4 — Input ✅ XONG phần code, CHỜ kiểm chứng 2 máy (thiết kế: `07-phase4-input.md`)
+- ✅ **core**: `InputEvent` + build/parse trong `Wire`; `InputSender` (gom, đánh seq,
+  gửi lặp) / `InputReceiver` (khử trùng, đếm mất) — thuần C++20, test offline được.
+  `ClientSession::QueueInput` + `HostCallbacks::onInput` nối vào máy trạng thái sẵn có.
+- ✅ **Tinh chỉnh giao thức**: `seq` gắn với **từng event** thay vì từng gói (layout wire
+  không đổi). Không có nó thì bản gửi lặp bị hiểu thành thao tác mới — nhấn W một lần
+  thành ba lần. Xem `04-protocol.md` §6 và `07-phase4-input.md` §2.
+- ✅ **InputCapture** (client): Raw Input trên cửa sổ preview; bàn phím lấy **scancode**
+  (`RAWKEYBOARD.MakeCode`, không phải WM_KEYDOWN) — game DirectInput đọc scancode, gửi
+  vkCode thôi là game không nhận. Chuột 2 chế độ: tuyệt đối (mặc định) và tương đối
+  (F9, khoá + ẩn con trỏ) cho game FPS. F10 tạm dừng gửi input.
+- ✅ **InputInjector** (host): `SendInput` scancode + `KEYEVENTF_EXTENDEDKEY`; toạ độ
+  chuẩn hoá → client rect cửa sổ đích → màn hình ảo (`MOUSEEVENTF_VIRTUALDESK`).
+  Theo dõi phím/nút đang giữ → `ReleaseAll()` khi BYE/timeout/mất focus/thoát.
+- ✅ **Chống kẹt phím** 3 lớp: redundancy trong gói + phát lại khi rảnh + `ReleaseAll`.
+- ✅ **Phát sinh ngoài thiết kế — bẫy foreground**: `SendInput` bơm vào cửa sổ đang
+  foreground của host, KHÔNG vào một HWND. Chủ máy bấm sang app khác là người điều khiển
+  từ xa gõ thẳng vào trình duyệt/terminal của họ. Đã siết: chỉ bơm khi cửa sổ đang chia
+  sẻ có focus, không thì bỏ qua + nhả phím. Vừa chống gõ nhầm vừa đúng ngữ nghĩa
+  "chỉ chia sẻ cửa sổ này".
+- ✅ **Kiểm chứng M1** `--nettest`: wire roundtrip (kể cả toạ độ âm), **bỏ 1/3 datagram
+  mà mọi event vẫn áp dụng đúng một lần, đúng thứ tự**, gói đảo thứ tự không tua ngược.
+- ✅ **Kiểm chứng M2** 2 process/1 máy: input đi trọn vòng client→host (`input 2 (mat 0)`),
+  video không hồi quy (e2e ~2.3 ms, 0% mất gói).
+- ⬜ **Còn lại — tiêu chí xong đầy đủ**: **M3** 2 máy LAN điều khiển ứng dụng thường;
+  **M4** 2 máy LAN điều khiển **game thật** (chuột nhìn + WASD), đo trễ input.
+  Input **không test được trên 1 máy**: agent bơm vào foreground, nếu cửa sổ preview của
+  client đang foreground thì phím vừa bơm bị chính client bắt lại → vòng lặp.
+- ⬜ Nếu game bỏ qua input (anti-cheat lọc `LLMHF_INJECTED`) → ViGEm (tay cầm, tầng
+  driver) hoặc Interception.
+- ⚠️ Game/app chạy quyền admin ở host: phải chạy agent **as administrator** (UIPI).
+
+**File thêm ở GĐ4:** core: `InputSender.h/.cpp`, `InputReceiver.h/.cpp` (+ `InputEvent`
+trong `Wire`); client/windows: `InputCapture.h/.cpp`, `InputInjector.h/.cpp`.
+Chạy: như GĐ3, input bật sẵn. `--noinput` = chỉ xem (đặt được ở cả hai vai trò).
+`client.exe <app> --injecttest` = thử riêng đường bơm input, không cần mạng (dev).
 
 ## Giai đoạn 5 — Ổn định & chất lượng
 - ⬜ RECONFIG khi cửa sổ resize (REQUEST_KEYFRAME đã làm ở GĐ3).

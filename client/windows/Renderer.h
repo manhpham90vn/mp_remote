@@ -16,6 +16,7 @@
 #include <windows.h>
 #include <d3d11.h>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -36,6 +37,18 @@ public:
 
     // DEBUG: frame ke tiep se luu backbuffer ra BMP (truoc khi Present) de kiem chung.
     void RequestDumpBmp(const std::string& path);
+
+    // GD4: chuyen tiep message cua so cho ben ngoai (InputCapture) TRUOC khi
+    // Renderer xu ly. Tra true = da tieu thu, Renderer bo qua message do.
+    // Renderer khong biet gi ve ngu nghia input - chi lam duong ong.
+    using MessageHook = std::function<bool(HWND, UINT, WPARAM, LPARAM)>;
+    void SetMessageHook(MessageHook hook);
+
+    // HWND cua so preview (nullptr neu chua Init) - de dang ky Raw Input.
+    HWND Hwnd() const;
+
+    // Kich thuoc vung client (dung de chuan hoa toa do chuot).
+    void ClientSize(uint32_t& w, uint32_t& h) const;
 
     // Bom message cua cua so - goi lap lai tren luong da Init.
     void Pump();

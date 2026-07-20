@@ -22,6 +22,7 @@
 #include <wrl/client.h>
 
 #include "GpuSelect.h"
+#include "InputInjector.h"
 #include "IVideoEncoder.h"
 #include "NetInfo.h"
 #include "TimeUs.h"
@@ -187,6 +188,16 @@ int RunAgent(HWND target, const AgentOptions& opt) {
     std::printf("[Agent] Nguon %ux%u @%ufps, %u Mbps. Cho client...\n",
                 offer.width, offer.height, opt.fps, opt.bitrateMbps);
 
+    // GD4: bom input tu client vao cua so dang chia se. Chi thread Recv cham vao.
+    InputInjector injector;
+    if (opt.allowInput) {
+        injector.SetEnabled(injector.Init(target));
+        std::printf("[Agent] Cho phep client dieu khien (chuot + ban phim).\n");
+    } else {
+        injector.SetEnabled(false);
+        std::printf("[Agent] CHI XEM - input tu client bi bo qua (--noinput).\n");
+    }
+
     NetAddr replyAddr; // dia chi nguon cua goi dang xu ly (chi thread Recv dung)
     rgc::HostCallbacks cb;
     cb.send = [&](std::span<const uint8_t> d) { sock.SendTo(replyAddr, d.data(), d.size()); };
@@ -195,8 +206,10 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         std::printf("[Agent] Client START — bat dau day video.\n");
     };
     cb.onKeyframeRequest = [&] { forceIdr.store(true); };
+    cb.onInput = [&](const rgc::InputEvent& e) { injector.Apply(e); };
     cb.onDisconnect = [&] {
         peerPacked.store(0, std::memory_order_release);
+        injector.ReleaseAll(); // BAT BUOC: mat ket noi giua luc giu phim = ket phim
         std::printf("[Agent] Client roi di (BYE/timeout) — cho client moi.\n");
     };
     session = std::make_unique<rgc::HostSession>(cb, offer);
@@ -240,17 +253,23 @@ int RunAgent(HWND target, const AgentOptions& opt) {
             const double secs = (now - lastStatUs) / 1e6;
             const uint32_t cap = captured.load();
             const uint64_t by = bytesSent.load(), fr = framesSent.load();
-            std::printf("[Agent] %-9s | capture %.0f fps | gui %.0f fps, %.0f kbps\n",
+            const auto& ist = session->inputStats();
+            std::printf("[Agent] %-9s | capture %.0f fps | gui %.0f fps, %.0f kbps"
+                        " | input %llu (mat %llu)\n",
                         StateName(session->state()),
                         (cap - lastCaptured) / secs,
                         (fr - lastFrames) / secs,
-                        (by - lastBytes) * 8.0 / 1000.0 / secs);
+                        (by - lastBytes) * 8.0 / 1000.0 / secs,
+                        (unsigned long long)ist.applied,
+                        (unsigned long long)ist.lost);
             lastStatUs = now;
             lastCaptured = cap;
             lastBytes = by;
             lastFrames = fr;
         }
     }
+
+    injector.ReleaseAll(); // thoat giua luc client dang giu phim -> nha ra
 
     // Chia tay tu te: bao BYE cho client neu con phien.
     if (session->state() != rgc::HostSession::State::Idle) {

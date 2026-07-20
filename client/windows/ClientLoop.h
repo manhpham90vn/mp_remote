@@ -11,6 +11,7 @@
 struct ClientOptions {
     NetAddr server;        // dia chi agent (--connect)
     bool    saveBmp = false;
+    bool    sendInput = true; // GD4: dang phim/chuot toi host (--noinput de tat)
 };
 
 // Ket noi toi agent, hien video toi khi nguoi dung dong cua so / Ctrl+C /
