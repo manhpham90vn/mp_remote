@@ -67,20 +67,22 @@ core/                           ★ DÙNG CHUNG GIỮA CÁC OS — thuần C++20
 │   ├── ByteOrder.h ✅          đọc/ghi u16/u32/u64 big-endian (shift byte)
 │   ├── Wire.h ✅               hằng số Type/Chan/Flags, struct message,
 │   │                           Build*/Parse* cho mọi loại gói v1
-│   ├── Packetizer.h ⬜         NAL frame → N mảnh VIDEO_PACKET ≤ MTU
-│   ├── Reassembler.h ⬜        mảnh → frame hoàn chỉnh; phát hiện mất; chính sách bỏ
-│   ├── HostSession.h ⬜        máy trạng thái phía Agent (IDLE→READY→STREAMING)
-│   └── ClientSession.h ⬜      máy trạng thái phía Client (handshake, ping, timeout)
-├── src/                        Wire.cpp ✅; Packetizer/Reassembler/*Session.cpp ⬜
+│   ├── Packetizer.h ✅         NAL frame → N mảnh VIDEO_PACKET ≤ MTU
+│   ├── Reassembler.h ✅        mảnh → frame hoàn chỉnh; phát hiện mất; chính sách bỏ
+│   ├── HostSession.h ✅        máy trạng thái phía Agent (IDLE→READY→STREAMING)
+│   └── ClientSession.h ✅      máy trạng thái phía Client (handshake, ping, timeout)
+├── src/                        Wire.cpp ✅; Packetizer/Reassembler/*Session.cpp ✅
 └── CMakeLists.txt              static lib `core`; build được standalone
                                 cho macOS/Ubuntu/iOS/Android
 
 client/
 └── windows/                    app Windows — MỘT exe `client.exe` (kiểu AnyDesk), link `core`
-    ├── UdpSocket.h/.cpp ⬜     platform: winsock2 (sau: #ifdef BSD sockets)
-    ├── AgentLoop.cpp ⬜        ghép: capture+encode (GĐ2) + Packetizer + HostSession + socket
-    ├── ClientLoop.cpp ⬜       ghép: socket + Reassembler + ClientSession + MfDecoder + Renderer
-    └── main.cpp                parse arg → --serve / --connect / các mode cũ
+    ├── UdpSocket.h/.cpp ✅     platform: winsock2 (sau: #ifdef BSD sockets)
+    ├── NetInfo.h/.cpp ✅       liệt kê IPv4 theo card mạng (menu chính + agent in địa chỉ)
+    ├── AgentLoop.cpp ✅        ghép: capture+encode (GĐ2) + Packetizer + HostSession + socket
+    ├── ClientLoop.cpp ✅       ghép: socket + Reassembler + ClientSession + MfDecoder + Renderer
+    ├── NetTest.cpp ✅          --nettest: self-test M1 (offline, chỉ dùng core)
+    └── main.cpp ✅             parse arg → --serve / --connect / --nettest / các mode cũ
 (sau này: client/macos, client/linux, client/ios, client/android — mỗi OS một app)
 ```
 
@@ -166,6 +168,12 @@ client decode được H.264 (`codecMask bit0`), không thì từ chối.
 ```
 client.exe game.exe --serve [--port 47777] [--bitrate 20] [--fps 60]
 ```
+
+**UX kiểu AnyDesk (thêm 2026-07-20):** chạy `client.exe` KHÔNG tham số → màn hình
+chính: liệt kê địa chỉ IP máy này theo từng card mạng (adapter ảo vEthernet xếp
+cuối), `[s]` chia sẻ ứng dụng (vào picker cửa sổ như cũ rồi `--serve`), `[c]` hoặc
+gõ thẳng `ip[:port]` để kết nối. Xong phiên (host lẫn client) quay lại menu.
+Agent khi bắt đầu nghe cũng in sẵn danh sách `ip:port` để đọc cho máy kia.
 
 ## 5. Phía Client (client Windows đầu tiên, tái dùng GĐ2)
 
@@ -266,8 +274,19 @@ Log mỗi 1s ở client (console): `fps nhận | kbps | frame bỏ | %gói mất
 1. ✅ Lập thư viện `core/` (CMake target `core`, app link vào; toàn repo build
    CMake + Ninja, cấu trúc `core/` + `client/<os>/`) với `rgc/ByteOrder.h` +
    `rgc/Wire.h` + `Wire.cpp` (+ `04-protocol.md` đã cập nhật header 8 byte).
-2. `Packetizer` + `Reassembler` (trong core) + mode `--nettest` (M1).
-3. `UdpSocket` (winsock, trong client/windows) + `HostSession`/`ClientSession` (trong core).
-4. `AgentLoop` (`--serve`): ghép GĐ2 + kiểm tra/sửa `ForceKeyframe` atomic + `repeatSPSPPS`.
-5. `ClientLoop` (`--connect`): ghép MfDecoder/Renderer GĐ2 (M2).
-6. Chạy 2 máy LAN, đo, tinh chỉnh timeout/buffer (M3, M4).
+2. ✅ `Packetizer` + `Reassembler` (trong core) + mode `--nettest` (M1 PASS 2026-07-20:
+   in-order / trộn thứ tự / mất gói / trùng gói / join giữa chừng / timeout đầu hàng
+   / mô phỏng handshake 2 session — bytes ra == vào, loss event đúng lúc).
+3. ✅ `UdpSocket` (winsock; tắt `SIO_UDP_CONNRESET`, SO_RCVBUF 4MB) +
+   `HostSession`/`ClientSession` (trong core).
+4. ✅ `AgentLoop` (`--serve`): `repeatSPSPPS=1` đã sẵn từ GĐ1; `forceIdr` là atomic
+   flag đặt từ thread Recv, tiêu thụ ở Encode kế tiếp. **Phát sinh ngoài thiết kế:**
+   WGC chỉ phát frame khi nội dung ĐỔI → agent cache bản sao frame cuối
+   (CopyResource, device bật multithread-protected); khi có yêu cầu IDR treo mà
+   nguồn tĩnh >200ms, thread Recv encode lại frame cache — không thì client join
+   màn hình tĩnh sẽ đen vĩnh viễn.
+5. ✅ `ClientLoop` (`--connect`): ghép MfDecoder/Renderer GĐ2. M2 PASS 2026-07-20
+   (2 process cùng máy, 127.0.0.1): handshake → hình hiển thị, nguồn tĩnh nhận IDR
+   từ cache, nguồn động ~13fps end-to-end, 0% mất gói, e2e ~4–7 ms; client thoát →
+   agent về IDLE chờ client mới.
+6. ⬜ Chạy 2 máy LAN, đo, tinh chỉnh timeout/buffer (M3, M4) — cần máy thứ hai.

@@ -1,16 +1,19 @@
-// Agent - Giai doan 0+1+2: bat hinh cua so game (WGC), nen hardware, va loopback
-// giai ma + hien thi de kiem chung ca chuoi codec truoc khi co mang.
+// client.exe - MOT exe kieu AnyDesk chua ca hai vai tro (GD0..GD3).
 //
-// Luong thuong (--encode): capture -> encoder -> file (.h264/.mp4).
-// Luong loopback (--loopback): capture -> NVENC (NAL Annex-B, khong file)
-//     -> MfDecoder (D3D11VA, NV12 VRAM) -> Renderer (VideoProcessor -> swapchain).
-//     Tat ca trong CUNG process, cung D3D11 device - chua co bien so mang (GD3).
+// Vai tro mang (GD3):
+//   --serve [--port N]            host: capture + NVENC -> UDP toi client
+//   --connect ip[:port]           client: UDP -> decode -> cua so preview
+//   --nettest                     self-test offline packetize/reassemble/session (M1)
+// Che do cu (kiem chung khong mang):
+//   --encode  capture -> encoder -> file (.h264/.mp4)
+//   --loopback capture -> NVENC -> MfDecoder -> Renderer trong CUNG process
 //
-// Build: mo ConsoleApplication1.slnx trong Visual Studio, cau hinh x64.
-// Chay:  ConsoleApplication1.exe [game.exe] [--encode|--loopback] [--out FILE]
-//                                [--bitrate Mbps] [--fps N] [--frames N] [--save]
-// Khong truyen [game.exe] -> hien menu liet ke cua so dang mo de chon nguon stream,
-// chon xong tu dong vao che do loopback (tru khi truyen --encode).
+// Build: CMake + Ninja (CMakePresets.json, preset x64-debug/x64-release).
+// Chay:  client.exe [game.exe] [--serve|--connect ip[:port]|--nettest|--encode|--loopback]
+//                   [--port N] [--out FILE] [--bitrate Mbps] [--fps N] [--frames N] [--save]
+// KHONG tham so -> man hinh chinh kieu AnyDesk: hien dia chi IP may nay theo tung
+// card mang, [s] chia se ung dung (chon tu danh sach cua so), [c]/go thang ip de
+// ket noi toi may khac. Cac co CLI van giu nguyen cho automation/test.
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -30,15 +33,11 @@
 #include "IVideoEncoder.h"
 #include "IVideoDecoder.h"
 #include "Renderer.h"
-
-// Dong ho don dieu (micro giay) de do do tre end-to-end trong loopback.
-static uint64_t QpcUs() {
-    static LARGE_INTEGER freq = [] { LARGE_INTEGER f; QueryPerformanceFrequency(&f); return f; }();
-    LARGE_INTEGER c;
-    QueryPerformanceCounter(&c);
-    return (uint64_t)(c.QuadPart / freq.QuadPart) * 1'000'000ull +
-           (uint64_t)(c.QuadPart % freq.QuadPart) * 1'000'000ull / (uint64_t)freq.QuadPart;
-}
+#include "TimeUs.h"
+#include "AgentLoop.h"
+#include "ClientLoop.h"
+#include "NetInfo.h"
+#include "NetTest.h"
 
 // Menu console: liet ke cua so dang mo, cho nguoi dung chon nguon stream.
 // Tra ve nullptr neu nguoi dung thoat (q) hoac khong con cua so nao.
@@ -75,64 +74,19 @@ static HWND PickWindowFromConsole() {
     }
 }
 
-int main(int argc, char** argv) {
-    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    // UTF-8 cho console de wprintf in dung tieu de cua so co dau (tieng Viet...).
-    std::setlocale(LC_ALL, ".UTF8");
-    SetConsoleOutputCP(CP_UTF8);
-    capture::InitRuntime();
-
-    // --- Tham so dong lenh ---
-    std::wstring targetExe;   // rong -> hien menu chon cua so
-    std::wstring outPath = L"output.mp4";
-    bool     saveBmp = false;
-    bool     doEncode = false;
-    bool     doLoopback = false;
-    bool     framesSet = false;
-    int      targetFrames = 120;
-    uint32_t fps = 60;
-    uint32_t bitrateMbps = 20;
-
-    for (int i = 1; i < argc; ++i) {
-        std::string a(argv[i]);
-        auto next = [&](uint32_t def) -> uint32_t {
-            if (i + 1 < argc) { int v = std::atoi(argv[++i]); return v > 0 ? (uint32_t)v : def; }
-            return def;
-        };
-        if (a == "--save")          saveBmp = true;
-        else if (a == "--encode")   doEncode = true;
-        else if (a == "--loopback") doLoopback = true;
-        else if (a == "--frames") { targetFrames = (int)next(120); framesSet = true; }
-        else if (a == "--fps")      fps = next(60);
-        else if (a == "--bitrate")  bitrateMbps = next(20);
-        else if (a == "--out" && i + 1 < argc) {
-            std::string s(argv[++i]); outPath.assign(s.begin(), s.end());
-        }
-        else if (!a.empty() && a[0] != '-') targetExe.assign(a.begin(), a.end());
-    }
-
-    // --- Chon GPU theo chuoi uu tien: NVIDIA -> Intel -> CPU (WARP) ---
-    GpuChoice gpu;
-    if (!CreateBestDevice({ GpuVendor::Nvidia, GpuVendor::Intel, GpuVendor::Amd }, gpu)) {
-        std::printf("Khong tao duoc D3D11 device tren GPU nao.\n");
-        return 1;
-    }
-    std::wprintf(L"GPU da chon: %ls [%ls]%ls\n", gpu.description.c_str(),
-        GpuVendorName(gpu.vendor), gpu.hardware ? L"" : L" (software)");
-
-    // --- Tim cua so game: theo ten exe neu duoc truyen, khong thi cho chon tu menu ---
+// Tim cua so nguon: theo ten exe neu co, khong thi hien menu chon; restore neu
+// dang thu nho. nullptr = nguoi dung thoat / khong tim thay / khong restore duoc.
+static HWND ResolveTargetWindow(const std::wstring& targetExe) {
     HWND target = nullptr;
     if (targetExe.empty()) {
         target = PickWindowFromConsole();
-        if (!target) return 0;   // nguoi dung thoat
-        // Chon tu menu -> mac dinh vao loopback luon (tru khi da chi dinh --encode).
-        if (!doEncode) doLoopback = true;
+        if (!target) return nullptr; // nguoi dung thoat
     } else {
         target = FindWindowByProcessName(targetExe);
         if (!target) {
-            std::wprintf(L"Khong tim thay cua so cua %ls. Hay chac chan game dang chay.\n",
+            std::wprintf(L"Khong tim thay cua so cua %ls. Hay chac chan ung dung dang chay.\n",
                 targetExe.c_str());
-            return 1;
+            return nullptr;
         }
     }
     // Cua so minimize thi WGC khong nhan duoc frame - restore truoc khi capture,
@@ -143,14 +97,167 @@ int main(int argc, char** argv) {
         for (int i = 0; i < 100 && IsIconic(target); ++i) Sleep(10);
         if (IsIconic(target)) {
             std::printf("Khong restore duoc cua so - dung.\n");
-            return 1;
+            return nullptr;
         }
         Sleep(300);  // doi animation restore xong de frame dau khong meo kich thuoc
     }
-
     wchar_t title[256] = {};
     GetWindowTextW(target, title, 256);
     std::wprintf(L"Da bam vao cua so: \"%ls\"\n", title);
+    return target;
+}
+
+// Cat khoang trang/xuong dong hai dau.
+static std::string Trim(const char* line) {
+    std::string s(line);
+    while (!s.empty() && (s.back() == '\n' || s.back() == '\r' || s.back() == ' ')) s.pop_back();
+    const size_t b = s.find_first_not_of(' ');
+    return b == std::string::npos ? std::string() : s.substr(b);
+}
+
+// Man hinh chinh kieu AnyDesk khi chay khong tham so: hien dia chi may nay theo
+// tung card mang + chon vai tro. Sau moi phien (host/client) quay lai menu.
+static int RunMainMenu(uint16_t port, uint32_t fps, uint32_t bitrateMbps, bool saveBmp) {
+    for (;;) {
+        std::printf("\n==================================================\n");
+        std::printf("  RemoteGame - stream & dieu khien ung dung tu xa\n");
+        std::printf("==================================================\n");
+        const auto addrs = ListLocalIPv4();
+        if (addrs.empty()) {
+            std::printf("(!) Khong thay dia chi mang nao - kiem tra Wi-Fi/day mang.\n");
+        } else {
+            std::printf("Dia chi MAY NAY (doc cho nguoi o may kia nhap vao):\n");
+            for (const auto& a : addrs)
+                std::wprintf(L"    %-24ls %hs:%u\n", a.name.c_str(), a.ip.c_str(), port);
+        }
+        std::printf("\n  [s] Chia se ung dung tren may nay (lam host)\n");
+        std::printf("  [c] Ket noi toi may khac (xem hinh)\n");
+        std::printf("  [q] Thoat\n");
+        std::printf("Chon s/c/q (hoac go thang dia chi ip[:port] de ket noi): ");
+
+        char line[128] = {};
+        if (!std::fgets(line, sizeof(line), stdin)) return 0;
+        const std::string s = Trim(line);
+        if (s.empty()) continue;
+        if (s == "q" || s == "Q") return 0;
+
+        if (s == "s" || s == "S") {
+            HWND target = ResolveTargetWindow(L"");
+            if (!target) continue; // quay lai menu
+            AgentOptions ao;
+            ao.port = port;
+            ao.fps = fps;
+            ao.bitrateMbps = bitrateMbps;
+            RunAgent(target, ao);
+            std::printf("\n(Da dung chia se - quay lai menu chinh.)\n");
+            continue;
+        }
+
+        std::string addrStr;
+        if (s == "c" || s == "C") {
+            std::printf("Nhap dia chi may host (ip[:port]): ");
+            char l2[128] = {};
+            if (!std::fgets(l2, sizeof(l2), stdin)) return 0;
+            addrStr = Trim(l2);
+            if (addrStr.empty()) continue;
+        } else {
+            addrStr = s; // nguoi dung go thang ip vao menu
+        }
+        ClientOptions co;
+        co.saveBmp = saveBmp;
+        if (!ParseNetAddr(addrStr, port, co.server)) {
+            std::printf("Dia chi khong hop le: \"%s\" (vi du: 192.168.1.10 hoac 192.168.1.10:47777)\n",
+                        addrStr.c_str());
+            continue;
+        }
+        RunClient(co);
+        std::printf("\n(Phien ket thuc - quay lai menu chinh.)\n");
+    }
+}
+
+int main(int argc, char** argv) {
+    SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+    // UTF-8 cho console de wprintf in dung tieu de cua so co dau (tieng Viet...).
+    std::setlocale(LC_ALL, ".UTF8");
+    SetConsoleOutputCP(CP_UTF8);
+    // Log ra ngay ca khi stdout bi redirect (CRT full-buffer khi khong phai console).
+    setvbuf(stdout, nullptr, _IONBF, 0);
+    capture::InitRuntime();
+
+    // --- Tham so dong lenh ---
+    std::wstring targetExe;   // rong -> hien menu chon cua so
+    std::wstring outPath = L"output.mp4";
+    std::string  connectAddr; // --connect ip[:port]
+    bool     saveBmp = false;
+    bool     doEncode = false;
+    bool     doLoopback = false;
+    bool     doServe = false;
+    bool     doNetTest = false;
+    bool     framesSet = false;
+    int      targetFrames = 120;
+    uint32_t fps = 60;
+    uint32_t bitrateMbps = 20;
+    uint32_t port = 47777;
+
+    for (int i = 1; i < argc; ++i) {
+        std::string a(argv[i]);
+        auto next = [&](uint32_t def) -> uint32_t {
+            if (i + 1 < argc) { int v = std::atoi(argv[++i]); return v > 0 ? (uint32_t)v : def; }
+            return def;
+        };
+        if (a == "--save")          saveBmp = true;
+        else if (a == "--encode")   doEncode = true;
+        else if (a == "--loopback") doLoopback = true;
+        else if (a == "--serve")    doServe = true;
+        else if (a == "--nettest")  doNetTest = true;
+        else if (a == "--connect" && i + 1 < argc) connectAddr = argv[++i];
+        else if (a == "--port")     port = next(47777);
+        else if (a == "--frames") { targetFrames = (int)next(120); framesSet = true; }
+        else if (a == "--fps")      fps = next(60);
+        else if (a == "--bitrate")  bitrateMbps = next(20);
+        else if (a == "--out" && i + 1 < argc) {
+            std::string s(argv[++i]); outPath.assign(s.begin(), s.end());
+        }
+        else if (!a.empty() && a[0] != '-') targetExe.assign(a.begin(), a.end());
+    }
+
+    // --- GD3: cac mode khong can cua so nguon ---
+    if (doNetTest) return RunNetTest();
+    if (!connectAddr.empty()) {
+        ClientOptions co;
+        if (!ParseNetAddr(connectAddr, uint16_t(port), co.server)) {
+            std::printf("Dia chi --connect khong hop le: %s (dang ip[:port])\n", connectAddr.c_str());
+            return 1;
+        }
+        co.saveBmp = saveBmp;
+        return RunClient(co);
+    }
+
+    // --- Khong tham so nao -> man hinh chinh kieu AnyDesk (chon vai tro) ---
+    if (targetExe.empty() && !doServe && !doEncode && !doLoopback)
+        return RunMainMenu(uint16_t(port), fps, bitrateMbps, saveBmp);
+
+    // --- Tim cua so nguon cho cac mode can capture ---
+    HWND target = ResolveTargetWindow(targetExe);
+    if (!target) return targetExe.empty() ? 0 : 1;
+
+    // --- GD3: vai tro host (--serve) — AgentLoop tu chon GPU va chay vong mang ---
+    if (doServe) {
+        AgentOptions ao;
+        ao.port = uint16_t(port);
+        ao.fps = fps;
+        ao.bitrateMbps = bitrateMbps;
+        return RunAgent(target, ao);
+    }
+
+    // --- Chon GPU theo chuoi uu tien: NVIDIA -> Intel -> CPU (WARP) ---
+    GpuChoice gpu;
+    if (!CreateBestDevice({ GpuVendor::Nvidia, GpuVendor::Intel, GpuVendor::Amd }, gpu)) {
+        std::printf("Khong tao duoc D3D11 device tren GPU nao.\n");
+        return 1;
+    }
+    std::wprintf(L"GPU da chon: %ls [%ls]%ls\n", gpu.description.c_str(),
+        GpuVendorName(gpu.vendor), gpu.hardware ? L"" : L" (software)");
 
     // --- Trang thai dung chung giua main va cac callback ---
     // Thu tu khai bao = nguoc thu tu huy: encoder huy truoc decoder, decoder truoc renderer

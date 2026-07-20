@@ -20,6 +20,11 @@ add_executable(client
     EncoderFactory.cpp
     MfDecoder.cpp
     Renderer.cpp
+    UdpSocket.cpp
+    NetInfo.cpp
+    AgentLoop.cpp
+    ClientLoop.cpp
+    NetTest.cpp
 )
 
 target_compile_definitions(client PRIVATE UNICODE _UNICODE _CONSOLE)

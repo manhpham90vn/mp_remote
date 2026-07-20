@@ -7,6 +7,10 @@ project(RemoteGameCore LANGUAGES CXX)
 
 add_library(core STATIC
     src/Wire.cpp
+    src/Packetizer.cpp
+    src/Reassembler.cpp
+    src/HostSession.cpp
+    src/ClientSession.cpp
 )
 target_compile_features(core PUBLIC cxx_std_20)
 target_include_directories(core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
