@@ -8,6 +8,7 @@
 
 #include "AgentLoop.h"
 #include "ClientLoop.h"
+#include "ElevatedShare.h"
 #include "NetInfo.h"
 #include "SourcePickerDialog.h"
 #include "UdpSocket.h"
@@ -66,6 +67,28 @@ void DoShare(MenuState& st) {
     ao.fps = GetEditUint(st.editFps, kDefaultFps);
     ao.bitrateMbps = GetEditUint(st.editBitrate, kDefaultBitrateMbps);
     ao.allowInput = allow;
+
+    // UIPI: input chỉ đi tới được cửa sổ của tiến trình có integrity level không
+    // cao hơn mình. Host quyền thường vẫn capture được game/app chạy admin nhưng
+    // SendInput bị nuốt im lặng - nên xin elevate ngay lúc bấm Share thay vì để
+    // người kia phát hiện chuột/phím chết giữa phiên.
+    if (ao.allowInput && !IsProcessElevated()) {
+        bool cancelled = false;
+        if (RelaunchElevatedShare(sources, ao, cancelled)) {
+            st.quit = true; // instance admin tiếp quản đúng phiên này
+            return;
+        }
+        MessageBoxW(st.hwnd,
+                    cancelled
+                        ? L"Continuing without administrator rights.\n\n"
+                          L"Mouse/keyboard control will not reach apps that run as "
+                          L"administrator (games with anti-cheat, elevated tools). "
+                          L"Everything else still works."
+                        : L"Could not restart as administrator.\n\n"
+                          L"Sharing continues without it: mouse/keyboard control will "
+                          L"not reach apps that run as administrator.",
+                    L"RemoteGame", MB_OK | MB_ICONWARNING);
+    }
 
     ShowWindow(st.hwnd, SW_HIDE);
     RunAgent(sources, ao);

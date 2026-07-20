@@ -27,6 +27,7 @@ add_executable(client
     InputCapture.cpp
     InputInjector.cpp
     NetTest.cpp
+    ElevatedShare.cpp
     WindowPickerDialog.cpp
     SourcePickerDialog.cpp
     MainMenuWindow.cpp
