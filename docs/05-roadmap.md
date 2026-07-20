@@ -80,21 +80,43 @@ Chạy: `client.exe game.exe --encode --out out.mp4 --bitrate 20 --fps 60 --fram
 Chạy: `client.exe game.exe --loopback [--frames N] [--save]`
 (không `--frames`: chạy tới khi đóng cửa sổ preview / nhấn ESC).
 
-## Giai đoạn 3 — Transport + Protocol v1 (thiết kế chi tiết: `06-phase3-transport.md`)
-- 🔶 **Thư viện chung `core/`** (static lib, namespace `rgc`) — thuần C++20, **không
-  Windows header**, dùng chung giữa các OS. Cấu trúc repo: `core/` + `client/<os>/`
-  (hiện có `client/windows` — MỘT exe `client.exe` kiểu AnyDesk chứa cả vai trò host
-  lẫn client). Toàn repo build **CMake + Ninja** (CMakePresets); core build được
-  standalone cho nền tảng khác. Đã có: ByteOrder + Wire (Build/Parse mọi gói v1).
-  Còn: Packetizer/Reassembler/Session + self-test `--nettest`.
-- ⬜ `UdpSocket` (winsock, mỏng, trong exe); header chung 8 byte (thêm sessionId) + VIDEO_PACKET.
-- ⬜ Packetize/reassemble frame; chính sách bỏ frame + chờ IDR ở client.
-- ⬜ Handshake HELLO/HELLO_ACK/START; PING/PONG đo RTT.
-- ⬜ **REQUEST_KEYFRAME khi mất gói** (kéo từ GĐ5 về — GOP vô hạn nên mất gói không có
-  IDR-on-demand là vỡ hình vĩnh viễn); NVENC bật `repeatSPSPPS`.
-- ⬜ Mode `--serve` (agent) / `--connect ip:port` (client Windows, tái dùng decoder/renderer GĐ2).
-- **Tiêu chí xong**: Agent và Client trên **hai máy LAN**, client thấy hình game realtime;
-  đo được độ trễ và % mất gói; giả lập drop 2–5% tự phục hồi qua IDR.
+## Giai đoạn 3 — Transport + Protocol v1 ✅ XONG trên 1 máy (thiết kế: `06-phase3-transport.md`)
+- ✅ **Thư viện chung `core/`** (static lib, namespace `rgc`) — thuần C++20, **không
+  Windows header**, dùng chung giữa các OS; không thread/socket/đồng hồ (thời gian
+  bơm từ ngoài qua `nowUs` → test được offline). Cấu trúc repo: `core/` +
+  `client/<os>/`; build **CMake + Ninja**. Đủ bộ: `ByteOrder` + `Wire` (header chung
+  8 byte có sessionId) + `Packetizer` + `Reassembler` + `HostSession`/`ClientSession`.
+- ✅ `UdpSocket` (winsock, mỏng, trong exe): tắt `SIO_UDP_CONNRESET`, SO_RCVBUF 4 MB,
+  recvfrom timeout 100 ms. Chỉ lớp này là platform-specific.
+- ✅ Packetize/reassemble frame: trả frame **theo thứ tự frameId**, giữ ≤4 frame đang
+  ghép, bỏ frame khi quá 2 khoảng frame hoặc bị ≥2 frame mới hoàn chỉnh vượt mặt;
+  sau loss nuốt non-IDR tới khi gặp IDR.
+- ✅ Handshake HELLO/HELLO_ACK/START (retry 500 ms); PING mỗi 1 s đo RTT; BYE +
+  timeout 5 s hai phía; host về IDLE chờ client mới sau khi client rời.
+- ✅ **REQUEST_KEYFRAME khi mất gói** (retry 250 ms tới khi có IDR); `repeatSPSPPS=1`
+  (có sẵn từ GĐ1); `forceIdr` là cờ atomic đặt từ thread Recv, tiêu thụ ở Encode kế tiếp.
+- ✅ Mode `--serve` (AgentLoop) / `--connect ip[:port]` (ClientLoop, tái dùng
+  MfDecoder/Renderer GĐ2) / `--nettest` (self-test M1). Client log mỗi 1 s:
+  fps | kbps | frame bỏ | % gói mất | RTT | trễ e2e ước lượng.
+- ✅ **UX kiểu AnyDesk**: chạy không tham số → menu chính hiện IP máy này theo từng
+  card mạng (`NetInfo`, adapter ảo xếp cuối), `[s]` chia sẻ ứng dụng (picker cửa sổ
+  như cũ), `[c]`/gõ thẳng `ip[:port]` để kết nối; xong phiên quay lại menu.
+- ✅ **Phát sinh ngoài thiết kế**: WGC chỉ phát frame khi nội dung đổi → agent cache
+  frame cuối (CopyResource) và encode lại từ thread Recv khi có yêu cầu IDR treo mà
+  nguồn tĩnh >200 ms — không thì client join màn hình tĩnh sẽ đen vĩnh viễn.
+- ✅ **Kiểm chứng** (2026-07-20): **M1** `--nettest` PASS (in-order/trộn/mất/trùng/join
+  giữa chừng/timeout + mô phỏng handshake 2 session, bytes ra == vào). **M2** 2 process
+  qua 127.0.0.1 PASS: handshake → hình hiển thị (cả nguồn tĩnh lẫn động ~13 fps),
+  0% mất gói, RTT ~5–10 ms, trễ e2e ~4–7 ms; client thoát → agent về IDLE.
+- ⬜ **Còn lại — tiêu chí xong đầy đủ**: **M3** hai máy LAN (nhớ mở firewall UDP 47777
+  trên host), **M4** giả lập drop 2–5% (tool clumsy) tự phục hồi qua IDR ≤ vài trăm ms.
+
+**File thêm ở GĐ3:** core: `Packetizer.h/.cpp`, `Reassembler.h/.cpp`,
+`HostSession.h/.cpp`, `ClientSession.h/.cpp` (+ `ByteOrder.h`, `Wire.h/.cpp` từ trước);
+client/windows: `UdpSocket.h/.cpp`, `NetInfo.h/.cpp`, `AgentLoop.h/.cpp`,
+`ClientLoop.h/.cpp`, `NetTest.h/.cpp`, `TimeUs.h`.
+Chạy: máy host `client.exe` → `[s]` (hoặc `client.exe game.exe --serve [--port N]`);
+máy xem `client.exe` → gõ `ip[:port]` (hoặc `client.exe --connect ip[:port]`).
 
 ## Giai đoạn 4 — Input (RỦI RO CAO thứ hai)
 - ⬜ InputCapture ở client (Raw Input) → INPUT_EVENT.
