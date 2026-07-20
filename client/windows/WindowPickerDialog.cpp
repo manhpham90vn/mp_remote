@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "WindowFinder.h"
+#include "rgc/Wire.h" // kMaxSources
 
 namespace {
 
@@ -16,47 +17,113 @@ constexpr int kIdRefresh  = 101;
 constexpr int kIdChkAllow = 102;
 constexpr int kIdOk       = 103;
 constexpr int kIdCancel   = 104;
+constexpr int kIdHint     = 105;
 
-// Format giống hệt menu console cũ: "[exe] title (WxH)" / "(thu nhỏ)".
-std::wstring FormatEntry(const WindowInfo& w) {
-    wchar_t buf[400];
-    if (w.minimized) {
-        swprintf(buf, 400, L"[%ls] %ls (minimized)", w.exeName.c_str(), w.title.c_str());
-    } else {
-        swprintf(buf, 400, L"[%ls] %ls (%ux%u)", w.exeName.c_str(), w.title.c_str(),
-                 w.width, w.height);
+// Tên nguồn đi trên dây là UTF-8 (client có thể không phải Windows).
+std::string ToUtf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()),
+                                      nullptr, 0, nullptr, nullptr);
+    if (n <= 0) return {};
+    std::string s(size_t(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, w.c_str(), int(w.size()), s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+// Một dòng trong danh sách: nguồn kèm nhãn hiển thị.
+struct Entry {
+    CaptureTarget target;
+    std::wstring  label; // hiện trong listbox
+    std::wstring  name;  // tên gửi cho client (không kèm kích thước)
+};
+
+BOOL CALLBACK CollectMonitor(HMONITOR mon, HDC, LPRECT, LPARAM lp) {
+    auto* out = (std::vector<Entry>*)lp;
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(mon, (MONITORINFO*)&mi)) return TRUE;
+
+    const int w = mi.rcMonitor.right - mi.rcMonitor.left;
+    const int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+    const bool primary = (mi.dwFlags & MONITORINFOF_PRIMARY) != 0;
+
+    wchar_t name[128];
+    swprintf(name, 128, L"Screen %zu%ls", out->size() + 1, primary ? L" (primary)" : L"");
+    wchar_t label[200];
+    swprintf(label, 200, L"[screen] %ls (%dx%d)", name, w, h);
+
+    out->push_back(Entry{CaptureTarget::Monitor(mon), label, name});
+    return TRUE;
+}
+
+std::vector<Entry> BuildEntries() {
+    std::vector<Entry> entries;
+    // Màn hình lên trước: "chia sẻ cả màn hình" là lựa chọn hay dùng nhất.
+    EnumDisplayMonitors(nullptr, nullptr, CollectMonitor, (LPARAM)&entries);
+
+    for (const auto& w : ListCapturableWindows()) {
+        wchar_t label[400];
+        if (w.minimized) {
+            swprintf(label, 400, L"[%ls] %ls (minimized)", w.exeName.c_str(), w.title.c_str());
+        } else {
+            swprintf(label, 400, L"[%ls] %ls (%ux%u)", w.exeName.c_str(), w.title.c_str(),
+                     w.width, w.height);
+        }
+        entries.push_back(Entry{CaptureTarget::Window(w.hwnd), label, w.title});
     }
-    return buf;
+    return entries;
 }
 
 struct PickerState {
     HWND hwnd = nullptr;
     HWND list = nullptr;
     HWND chkAllow = nullptr;
-    std::vector<WindowInfo> windows;
-    HWND result = nullptr;
+    std::vector<Entry> entries;
+    std::vector<AgentSource> result;
     bool allowInput = true;
     bool done = false;
 };
 
 void Repopulate(PickerState& st) {
-    st.windows = ListCapturableWindows();
+    st.entries = BuildEntries();
     SendMessageW(st.list, LB_RESETCONTENT, 0, 0);
-    if (st.windows.empty()) {
-        SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)L"(No windows found to share)");
+    if (st.entries.empty()) {
+        SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)L"(Nothing found to share)");
         EnableWindow(GetDlgItem(st.hwnd, kIdOk), FALSE);
-    } else {
-        for (const auto& w : st.windows)
-            SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)FormatEntry(w).c_str());
-        SendMessageW(st.list, LB_SETCURSEL, 0, 0);
-        EnableWindow(GetDlgItem(st.hwnd, kIdOk), TRUE);
+        return;
     }
+    for (const auto& e : st.entries)
+        SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)e.label.c_str());
+    SendMessageW(st.list, LB_SETSEL, TRUE, 0); // chọn sẵn dòng đầu
+    EnableWindow(GetDlgItem(st.hwnd, kIdOk), TRUE);
 }
 
 void Confirm(PickerState& st) {
-    const LRESULT sel = SendMessageW(st.list, LB_GETCURSEL, 0, 0);
-    if (sel == LB_ERR || (size_t)sel >= st.windows.size()) return; // không chọn gì
-    st.result = st.windows[(size_t)sel].hwnd;
+    const LRESULT count = SendMessageW(st.list, LB_GETSELCOUNT, 0, 0);
+    if (count <= 0 || st.entries.empty()) return; // chưa chọn gì
+
+    std::vector<int> sel(static_cast<size_t>(count), 0);
+    SendMessageW(st.list, LB_GETSELITEMS, WPARAM(count), (LPARAM)sel.data());
+
+    st.result.clear();
+    for (int i : sel) {
+        if (i < 0 || size_t(i) >= st.entries.size()) continue;
+        const Entry& e = st.entries[size_t(i)];
+        st.result.push_back(AgentSource{e.target, ToUtf8(e.name)});
+    }
+    if (st.result.empty()) return;
+
+    // Mỗi nguồn là một pipeline capture+encode riêng - quá nhiều thì GPU không kham
+    // nổi và kMaxSources cũng là trần của SOURCE_LIST trong một datagram.
+    if (st.result.size() > rgc::kMaxSources) {
+        wchar_t msg[160];
+        swprintf(msg, 160, L"Please select at most %zu sources (you selected %zu).",
+                 rgc::kMaxSources, st.result.size());
+        MessageBoxW(st.hwnd, msg, L"RemoteGame", MB_OK | MB_ICONWARNING);
+        st.result.clear();
+        return;
+    }
+
     st.allowInput = SendMessageW(st.chkAllow, BM_GETCHECK, 0, 0) == BST_CHECKED;
     st.done = true;
 }
@@ -84,7 +151,8 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 } // namespace
 
-bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
+bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
+                            bool& outAllowInput) {
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -93,7 +161,7 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     RegisterClassW(&wc); // lần 2 trả ALREADY_EXISTS - không sao
 
-    constexpr int kW = 480, kH = 380;
+    constexpr int kW = 520, kH = 420;
     RECT ownerRect{};
     if (owner) GetWindowRect(owner, &ownerRect);
     else SystemParametersInfoW(SPI_GETWORKAREA, 0, &ownerRect, 0);
@@ -103,7 +171,8 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
     const DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     RECT wr{ 0, 0, kW, kH };
     AdjustWindowRect(&wr, style, FALSE);
-    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kWndClass, L"Select a window to share",
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kWndClass,
+                                L"Select what to share (screens and/or windows)",
                                 style, x, y, wr.right - wr.left, wr.bottom - wr.top,
                                 owner, nullptr, wc.hInstance, nullptr);
     if (!dlg) return false;
@@ -120,14 +189,18 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
         return c;
     };
 
+    // LBS_MULTIPLESEL: click là bật/tắt một dòng. Dễ hiểu hơn LBS_EXTENDEDSEL
+    // (đòi giữ Ctrl) với thao tác "tick những thứ muốn chia sẻ".
     st.list = mk(L"LISTBOX", nullptr,
-                 LBS_NOTIFY | LBS_HASSTRINGS | WS_VSCROLL | WS_BORDER,
-                 12, 12, kW - 24, kH - 100, kIdList);
+                 LBS_NOTIFY | LBS_HASSTRINGS | LBS_MULTIPLESEL | WS_VSCROLL | WS_BORDER,
+                 12, 12, kW - 24, kH - 122, kIdList);
+    mk(L"STATIC", L"Click each screen or window you want to share (you can pick several).",
+       0, 12, kH - 104, kW - 24, 18, kIdHint);
     st.chkAllow = mk(L"BUTTON", L"Allow the other person to control mouse/keyboard",
                       BS_AUTOCHECKBOX, 12, kH - 82, kW - 24, 20, kIdChkAllow);
     SendMessageW(st.chkAllow, BM_SETCHECK, BST_CHECKED, 0);
     mk(L"BUTTON", L"Refresh", 0, 12, kH - 52, 90, 26, kIdRefresh);
-    mk(L"BUTTON", L"Select", BS_DEFPUSHBUTTON, kW - 24 - 180, kH - 52, 86, 26, kIdOk);
+    mk(L"BUTTON", L"Share", BS_DEFPUSHBUTTON, kW - 24 - 180, kH - 52, 86, 26, kIdOk);
     mk(L"BUTTON", L"Cancel", 0, kW - 24 - 88, kH - 52, 86, 26, kIdCancel);
 
     Repopulate(st);
@@ -148,7 +221,7 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
     if (owner) { EnableWindow(owner, TRUE); SetForegroundWindow(owner); }
     DestroyWindow(dlg);
 
-    outTarget = st.result;
+    outSources = std::move(st.result);
     outAllowInput = st.allowInput;
-    return st.result != nullptr;
+    return !outSources.empty();
 }

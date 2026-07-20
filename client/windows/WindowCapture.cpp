@@ -121,9 +121,14 @@ WindowCapture::WindowCapture() : impl_(std::make_unique<Impl>()) {}
 
 WindowCapture::~WindowCapture() { Stop(); }
 
-bool WindowCapture::Start(HWND hwnd, ID3D11Device* device, FrameHandler onFrame) {
+bool WindowCapture::Start(const CaptureTarget& target, ID3D11Device* device,
+                          FrameHandler onFrame) {
     if (!wgc::GraphicsCaptureSession::IsSupported()) {
         std::printf("Windows Graphics Capture is not supported on this machine.\n");
+        return false;
+    }
+    if (!target.valid()) {
+        std::printf("CaptureTarget must name exactly one of window / monitor.\n");
         return false;
     }
 
@@ -145,18 +150,23 @@ bool WindowCapture::Start(HWND hwnd, ID3D11Device* device, FrameHandler onFrame)
         CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), inspectable.put()));
     impl_->winrtDevice = inspectable.as<wgd3::IDirect3DDevice>();
 
-    // 3. Tạo GraphicsCaptureItem từ HWND (chỉ làm được qua interop).
+    // 3. Tạo GraphicsCaptureItem từ HWND hoặc HMONITOR (chỉ làm được qua interop).
     auto factory = winrt::get_activation_factory<wgc::GraphicsCaptureItem>();
     auto interop = factory.as<IGraphicsCaptureItemInterop>();
-    HRESULT hr = interop->CreateForWindow(
-        hwnd, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(impl_->item));
+    const HRESULT hr =
+        target.hwnd
+            ? interop->CreateForWindow(target.hwnd, winrt::guid_of<wgc::GraphicsCaptureItem>(),
+                                       winrt::put_abi(impl_->item))
+            : interop->CreateForMonitor(target.monitor, winrt::guid_of<wgc::GraphicsCaptureItem>(),
+                                        winrt::put_abi(impl_->item));
     if (FAILED(hr)) {
-        std::printf("CreateForWindow failed: 0x%08lX\n", (unsigned long)hr);
+        std::printf("%s failed: 0x%08lX\n",
+                    target.hwnd ? "CreateForWindow" : "CreateForMonitor", (unsigned long)hr);
         return false;
     }
 
     impl_->lastSize = impl_->item.Size();
-    std::printf("Window size: %dx%d\n", impl_->lastSize.Width, impl_->lastSize.Height);
+    std::printf("Capture source size: %dx%d\n", impl_->lastSize.Width, impl_->lastSize.Height);
 
     // 4. Frame pool (free-threaded -> FrameArrived chạy trên luồng thread-pool).
     impl_->framePool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(

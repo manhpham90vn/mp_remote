@@ -66,8 +66,10 @@ public:
     // Kích thước vùng client (dùng để chuẩn hóa tọa độ chuột).
     void ClientSize(uint32_t& w, uint32_t& h) const;
 
-    // Bơm message của cửa sổ - gọi lặp lại trên luồng đã Init.
-    void Pump();
+    // Bơm message của LUỒNG - gọi lặp lại trên luồng đã Init. Static vì PeekMessage
+    // không lọc theo HWND: một lần gọi phục vụ mọi cửa sổ preview trên luồng này
+    // (GD6 mở nhiều cửa sổ cùng lúc).
+    static void Pump();
 
     // True khi người dùng đóng cửa sổ preview.
     bool Closed() const;

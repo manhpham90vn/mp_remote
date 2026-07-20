@@ -118,7 +118,7 @@ void TestWireRoundtrip() {
 
     Hello h{0xDEADBEEF, kCodecMaskH264 | kCodecMaskHevc, 2560, 1440, 120, 0x0001};
     size_t n = BuildHello(buf, h);
-    Check(n == kCommonHeaderSize + 13, "HELLO size");
+    Check(n == kCommonHeaderSize + 14, "HELLO size"); // +1 byte sourceId ở GD6
     auto ch = ParseCommonHeader(std::span<const uint8_t>(buf, n));
     Check(ch && ch->type == MsgType::Hello && ch->sessionId == 0, "HELLO header");
     auto hp = ParseHello(PayloadOf(std::span<const uint8_t>(buf, n)));
@@ -227,6 +227,60 @@ void TestDropPacket() {
     Check(sawLoss, "loss event occurred after dropping frame");
     Check(ra.stats().framesDropped == 1 && ra.stats().packetsLost == 1, "drop/lost stats");
     Check(ra.stats().framesSkipped == 4, "4 non-IDR frames swallowed");
+}
+
+// ---- GD6: nhiều nguồn ----
+
+void TestSourceListWire() {
+    std::printf("[nettest] SOURCE_LIST + HELLO.sourceId round-trip...\n");
+    uint8_t buf[kMaxDatagram];
+
+    // Tên UTF-8 viết bằng escape thay vì ký tự thật: khỏi phụ thuộc mã hóa file
+    // nguồn và trình biên dịch có bật /utf-8 hay không. "\xE1\xBA\xA1" = "ạ" (3 byte).
+    const std::string kViet = "Cua so \xE1\xBA\xA1\xE1\xBA\xA1";
+
+    std::vector<SourceInfo> in;
+    in.push_back(SourceInfo{0, 1920, 1080, "Screen 1 (primary)"});
+    in.push_back(SourceInfo{1, 1689, 1392, "Notepad"});
+    in.push_back(SourceInfo{7, 800, 600, kViet});
+
+    size_t n = BuildSourceList(buf, in);
+    Check(n > 0 && n <= kMaxDatagram, "SOURCE_LIST fits one datagram");
+    auto ch = ParseCommonHeader(std::span<const uint8_t>(buf, n));
+    Check(ch && ch->type == MsgType::SourceList, "SOURCE_LIST header");
+
+    SourceInfo out[kMaxSources];
+    size_t cnt = ParseSourceList(PayloadOf(std::span<const uint8_t>(buf, n)), out);
+    Check(cnt == in.size(), "SOURCE_LIST count");
+    bool same = cnt == in.size();
+    for (size_t i = 0; same && i < cnt; ++i)
+        same = out[i].sourceId == in[i].sourceId && out[i].width == in[i].width &&
+               out[i].height == in[i].height && out[i].name == in[i].name;
+    Check(same, "SOURCE_LIST entries survive round-trip (including UTF-8 names)");
+
+    // Tên dài bị cắt, nhưng phải cắt ở ranh giới ký tự UTF-8 chứ không giữa chừng.
+    // Ký tự 3 byte, và kMaxSourceNameBytes=64 KHÔNG chia hết cho 3 — cắt ngây thơ ở
+    // đúng 64 sẽ xé đôi một ký tự, nên ca này bắt được lỗi đó (đáp án đúng: 63).
+    std::vector<SourceInfo> longName;
+    std::string vn;
+    while (vn.size() < kMaxSourceNameBytes + 20) vn += "\xE1\xBA\xA1";
+    longName.push_back(SourceInfo{3, 640, 480, vn});
+    n = BuildSourceList(buf, longName);
+    cnt = ParseSourceList(PayloadOf(std::span<const uint8_t>(buf, n)), out);
+    Check(cnt == 1, "long-name SOURCE_LIST parses");
+    if (cnt == 1) {
+        Check(out[0].name.size() <= kMaxSourceNameBytes, "long name truncated to limit");
+        Check(out[0].name.size() % 3 == 0, "truncation landed on a UTF-8 boundary");
+        Check(vn.compare(0, out[0].name.size(), out[0].name) == 0, "truncated name is a prefix");
+    }
+
+    // HELLO mang sourceId; gói 13 byte kiểu cũ vẫn đọc được, hiểu là nguồn 0.
+    Hello h{0xDEADBEEF, kCodecMaskH264, 2560, 1440, 120, 0, 5};
+    n = BuildHello(buf, h);
+    auto hp = ParseHello(PayloadOf(std::span<const uint8_t>(buf, n)));
+    Check(hp && hp->sourceId == 5, "HELLO carries sourceId");
+    auto old = ParseHello(PayloadOf(std::span<const uint8_t>(buf, n - 1)));
+    Check(old && old->sourceId == 0, "13-byte HELLO still parses as source 0");
 }
 
 // ---- GD5: FEC ----
@@ -697,6 +751,8 @@ int RunNetTest() {
     TestJoinMidStream();
     TestHeadTimeout();
     TestSessions();
+    std::printf("=== GD6 M1: self-test multi-source wire (offline) ===\n");
+    TestSourceListWire();
     std::printf("=== GD5 M1: self-test FEC (offline) ===\n");
     TestFecDisabledByDefault();
     TestFecRecoverOne();

@@ -34,6 +34,11 @@ public:
     // tới đúng nó. Trả false nếu target không hợp lệ.
     bool Init(HWND target);
 
+    // Nguồn là CẢ MÀN HÌNH: gốc tọa độ là rect của monitor, và không có chốt
+    // foreground — chốt đó tồn tại để input không rơi sang ứng dụng KHÁC không được
+    // chia sẻ, mà ở đây cả màn hình đã được chia sẻ nên không có "ứng dụng khác".
+    bool InitMonitor(HMONITOR monitor);
+
     // Bơm một event. Bỏ qua nếu đang tắt hoặc cửa sổ đích đã đóng.
     void Apply(const rgc::InputEvent& e);
 
@@ -64,7 +69,8 @@ private:
     void SendMoveAbsolute(int32_t nx, int32_t ny);
     void SendMoveRelative(int32_t dx, int32_t dy);
 
-    HWND target_ = nullptr;
+    HWND     target_ = nullptr;  // đúng một trong hai khác nullptr
+    HMONITOR monitor_ = nullptr;
     bool enabled_ = true;
     bool hadFocus_ = true;   // để chỉ log một lần mỗi khi đổi trạng thái focus
     uint64_t applied_ = 0;

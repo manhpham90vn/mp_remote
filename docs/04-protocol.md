@@ -45,6 +45,8 @@ Sau header 8 byte là payload tùy `Type`.
 | 0x02 | HELLO_ACK | control | A→C | có (retry) |
 | 0x03 | START | control | C→A | có |
 | 0x04 | STOP / BYE | control | cả hai | có |
+| 0x05 | LIST_SOURCES | control | C→A | có (retry 500ms) |
+| 0x06 | SOURCE_LIST | control | A→C | không |
 | 0x10 | VIDEO_PACKET | video | A→C | không |
 | 0x11 | FEC_PACKET | video | A→C | không (parity) |
 | 0x20 | INPUT_EVENT | input | C→A | tin cậy nhẹ (retry key) |
@@ -53,6 +55,46 @@ Sau header 8 byte là payload tùy `Type`.
 | 0x32 | FEEDBACK | control | C→A | không (định kỳ) |
 | 0x33 | REQUEST_KEYFRAME | control | C→A | có (retry) |
 | 0x34 | RECONFIG | control | A→C | có |
+
+## 3b. Nhiều nguồn trên một host (GĐ6)
+
+Một host chia sẻ được nhiều **nguồn** cùng lúc — mỗi nguồn là một cửa sổ hoặc cả một
+màn hình — trên **một cổng UDP duy nhất** (người dùng chỉ mở một cổng firewall và chỉ
+phải nhớ một địa chỉ).
+
+**Mỗi cặp (client, nguồn) là một PHIÊN ĐỘC LẬP**, có sessionId riêng. Đây là quyết
+định thiết kế chính: phương án kia là nhét `streamId` vào header video/input, nhưng
+như vậy phải sửa toàn bộ đường nóng (packetize, reassemble, FEC, input) và
+`HostSession`/`ClientSession` phải thành 1:N. Với phiên-mỗi-nguồn thì:
+
+- Kênh video, FEC, input, FEEDBACK, RECONFIG **không đổi một byte nào**.
+- `HostSession`/`ClientSession` vẫn là máy trạng thái 1:1 như GĐ3.
+- Mỗi nguồn tự có encoder, nên tự điều chỉnh bitrate và tự xin IDR theo tình trạng
+  của riêng nó — vốn là hành vi đúng, không phải mẹo.
+
+Cái giá: client mở N socket và N luồng PING. Không đáng kể.
+
+**Định tuyến ở host:** HELLO chưa có sessionId nên định tuyến theo `hello.sourceId`;
+mọi gói khác đã mang sessionId nên khớp thẳng với phiên tương ứng.
+
+### LIST_SOURCES (0x05) / SOURCE_LIST (0x06)
+
+LIST_SOURCES rỗng payload, sessionId = 0 (hỏi trước khi có phiên). Host trả
+SOURCE_LIST:
+
+```
+count(u8), rồi count lần:
+  sourceId(u8) | width(u16) | height(u16) | nameLen(u8) | name (UTF-8, ≤64 byte)
+```
+
+Tên bị cắt ở `kMaxSourceNameBytes` nhưng **lùi tới ranh giới ký tự UTF-8** — cắt giữa
+một ký tự nhiều byte sẽ hiện ô vuông ở danh sách phía client. Trần `kMaxSources` = 8
+nguồn để chắc chắn vừa một datagram (và vì mỗi nguồn là một pipeline capture+encode,
+nhiều hơn thì GPU không kham nổi).
+
+Client phát lại LIST_SOURCES mỗi 500ms trong ~3s. Host không trả lời (sai IP, firewall,
+hoặc bản cũ không biết message này) thì client cứ thử nguồn 0 — lỗi kết nối cụ thể từ
+`ClientSession` hữu ích hơn nhiều so với một hộp thoại "không thấy host".
 
 ## 4. Handshake (thiết lập phiên)
 
@@ -74,6 +116,7 @@ Client                                   Agent
 | maxHeight | u16 | |
 | desiredFps | u8 | FPS mong muốn. |
 | features | u16 | Bitmask: bit0=FEC, bit1=encryption, bit2=relative-mouse... |
+| sourceId | u8 | Nguồn muốn xem (lấy từ SOURCE_LIST). Thêm ở GĐ6; gói 13 byte kiểu cũ vẫn đọc được và hiểu là nguồn 0. |
 
 ### HELLO_ACK (0x02) — payload
 | Trường | Kiểu | Ý nghĩa |

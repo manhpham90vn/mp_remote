@@ -72,6 +72,13 @@ bool InputInjector::Init(HWND target) {
     return true;
 }
 
+bool InputInjector::InitMonitor(HMONITOR monitor) {
+    if (!monitor) return false;
+    monitor_ = monitor;
+    target_ = nullptr;
+    return true;
+}
+
 void InputInjector::SetEnabled(bool on) {
     if (enabled_ == on) return;
     if (!on) ReleaseAll(); // tắt giữa chừng không được để kẹt phím
@@ -102,16 +109,28 @@ void InputInjector::SendButton(rgc::MouseButton btn, bool down) {
 }
 
 void InputInjector::SendMoveAbsolute(int32_t nx, int32_t ny) {
-    RECT rc{};
-    if (!GetClientRect(target_, &rc)) return;
-    const int w = rc.right - rc.left;
-    const int h = rc.bottom - rc.top;
-    if (w <= 1 || h <= 1) return;
+    POINT pt{};
+    if (monitor_) {
+        // Nguồn là cả màn hình: gốc tọa độ là rect của monitor trên desktop ảo.
+        MONITORINFO mi{ sizeof(MONITORINFO) };
+        if (!GetMonitorInfoW(monitor_, &mi)) return;
+        const int w = mi.rcMonitor.right - mi.rcMonitor.left;
+        const int h = mi.rcMonitor.bottom - mi.rcMonitor.top;
+        if (w <= 1 || h <= 1) return;
+        pt.x = mi.rcMonitor.left + LONG(int64_t(nx) * (w - 1) / 65535);
+        pt.y = mi.rcMonitor.top  + LONG(int64_t(ny) * (h - 1) / 65535);
+    } else {
+        RECT rc{};
+        if (!GetClientRect(target_, &rc)) return;
+        const int w = rc.right - rc.left;
+        const int h = rc.bottom - rc.top;
+        if (w <= 1 || h <= 1) return;
 
-    // Chuẩn hóa (khung hình client nhìn thấy) -> pixel trong client rect đích.
-    POINT pt{ LONG(int64_t(nx) * (w - 1) / 65535),
-              LONG(int64_t(ny) * (h - 1) / 65535) };
-    if (!ClientToScreen(target_, &pt)) return;
+        // Chuẩn hóa (khung hình client nhìn thấy) -> pixel trong client rect đích.
+        pt.x = LONG(int64_t(nx) * (w - 1) / 65535);
+        pt.y = LONG(int64_t(ny) * (h - 1) / 65535);
+        if (!ClientToScreen(target_, &pt)) return;
+    }
 
     INPUT in{};
     in.type = INPUT_MOUSE;
@@ -130,6 +149,8 @@ void InputInjector::SendMoveRelative(int32_t dx, int32_t dy) {
 }
 
 bool InputInjector::TargetHasFocus() {
+    // Chia sẻ cả màn hình: không có ứng dụng nào "ngoài phạm vi chia sẻ" để bảo vệ.
+    if (monitor_) return true;
     const HWND fg = GetForegroundWindow();
     // Cửa sổ đích hoặc cửa sổ con/popup của nó (hộp thoại, menu) đều tính là đúng.
     const bool ok = fg && (fg == target_ || GetAncestor(fg, GA_ROOT) == target_);
@@ -147,7 +168,8 @@ bool InputInjector::TargetHasFocus() {
 }
 
 void InputInjector::Apply(const rgc::InputEvent& e) {
-    if (!enabled_ || !target_ || !IsWindow(target_)) return;
+    if (!enabled_) return;
+    if (!monitor_ && (!target_ || !IsWindow(target_))) return;
     if (!TargetHasFocus()) { ++skipped_; return; }
     ++applied_;
 

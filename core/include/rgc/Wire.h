@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 
 namespace rgc {
 
@@ -42,6 +43,8 @@ enum class MsgType : uint8_t {
     HelloAck        = 0x02,
     Start           = 0x03,
     Bye             = 0x04,
+    ListSources     = 0x05, // GĐ6: client hỏi host đang chia sẻ những cửa sổ nào
+    SourceList      = 0x06, // GĐ6: host trả danh sách
     VideoPacket     = 0x10,
     FecPacket       = 0x11, // GĐ5: parity XOR cho một nhóm gói video
     InputEvent      = 0x20, // GĐ4
@@ -70,6 +73,21 @@ struct CommonHeader {
     uint32_t sessionId; // 0 trong HELLO/HELLO_ACK; Agent cấp trong HELLO_ACK
 };
 
+// Một host chia sẻ nhiều cửa sổ cùng lúc. Mỗi cửa sổ là một "nguồn" có sourceId
+// riêng, và mỗi cặp (client, nguồn) là một PHIÊN ĐỘC LẬP với sessionId riêng —
+// không nhét streamId vào header video/input. Nhờ vậy kênh video, input, FEC,
+// congestion control giữ nguyên y hệt trường hợp một nguồn, và mỗi nguồn tự điều
+// chỉnh bitrate / xin IDR theo tình trạng của riêng nó (mỗi nguồn một encoder).
+inline constexpr size_t kMaxSources          = 8;
+inline constexpr size_t kMaxSourceNameBytes  = 64; // tiêu đề cửa sổ, UTF-8, cắt bớt
+
+struct SourceInfo {
+    uint8_t     sourceId = 0;
+    uint16_t    width = 0;
+    uint16_t    height = 0;
+    std::string name; // tiêu đề cửa sổ (UTF-8), chỉ để hiển thị
+};
+
 struct Hello {
     uint32_t clientId;
     uint16_t codecMask;
@@ -77,6 +95,7 @@ struct Hello {
     uint16_t maxHeight;
     uint8_t  desiredFps;
     uint16_t features;
+    uint8_t  sourceId; // nguồn muốn xem (lấy từ SOURCE_LIST; 0 = nguồn đầu tiên)
 };
 
 struct HelloAck {
@@ -172,6 +191,9 @@ struct FecPacketView {
 size_t BuildHello(std::span<uint8_t> out, const Hello& m);
 size_t BuildHelloAck(std::span<uint8_t> out, const HelloAck& m);
 size_t BuildStart(std::span<uint8_t> out, uint32_t sessionId);
+size_t BuildListSources(std::span<uint8_t> out);
+// Cắt bớt ở kMaxSources nguồn / kMaxSourceNameBytes byte tên để chắc chắn vừa 1 datagram.
+size_t BuildSourceList(std::span<uint8_t> out, std::span<const SourceInfo> sources);
 size_t BuildBye(std::span<uint8_t> out, uint32_t sessionId);
 size_t BuildPing(std::span<uint8_t> out, uint32_t sessionId, const PingPong& m);
 size_t BuildPong(std::span<uint8_t> out, uint32_t sessionId, const PingPong& m);
@@ -194,6 +216,8 @@ std::optional<CommonHeader> ParseCommonHeader(std::span<const uint8_t> datagram)
 std::span<const uint8_t> PayloadOf(std::span<const uint8_t> datagram);
 
 std::optional<Hello>    ParseHello(std::span<const uint8_t> payload);
+// Giải mã SOURCE_LIST vào `out` (đủ chỗ cho kMaxSources). Trả số nguồn đã ghi.
+size_t ParseSourceList(std::span<const uint8_t> payload, std::span<SourceInfo> out);
 std::optional<HelloAck> ParseHelloAck(std::span<const uint8_t> payload);
 std::optional<PingPong> ParsePingPong(std::span<const uint8_t> payload);
 std::optional<Feedback> ParseFeedback(std::span<const uint8_t> payload);

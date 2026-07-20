@@ -24,6 +24,15 @@ size_t BuildEmpty(std::span<uint8_t> out, MsgType type, uint32_t sessionId) {
     return WriteCommon(out, type, 0, Chan::Control, sessionId, 0);
 }
 
+// Cắt tên nguồn về ≤ limit byte NHƯNG lùi tới ranh giới ký tự UTF-8 — cắt giữa một
+// ký tự nhiều byte sẽ hiện ra ô vuông ở danh sách nguồn phía client.
+size_t Utf8TruncLen(const std::string& s, size_t limit) {
+    if (s.size() <= limit) return s.size();
+    size_t n = limit;
+    while (n > 0 && (uint8_t(s[n]) & 0xC0) == 0x80) --n; // lùi qua byte nối 10xxxxxx
+    return n;
+}
+
 size_t BuildPingPongImpl(std::span<uint8_t> out, MsgType type, uint32_t sessionId,
                          const PingPong& m) {
     constexpr size_t kPayload = 12;
@@ -38,7 +47,7 @@ size_t BuildPingPongImpl(std::span<uint8_t> out, MsgType type, uint32_t sessionI
 } // namespace
 
 size_t BuildHello(std::span<uint8_t> out, const Hello& m) {
-    constexpr size_t kPayload = 13;
+    constexpr size_t kPayload = 14;
     const size_t total = WriteCommon(out, MsgType::Hello, 0, Chan::Control, 0, kPayload);
     if (!total) return 0;
     uint8_t* p = out.data() + kCommonHeaderSize;
@@ -48,6 +57,36 @@ size_t BuildHello(std::span<uint8_t> out, const Hello& m) {
     PutU16(p + 8, m.maxHeight);
     p[10] = m.desiredFps;
     PutU16(p + 11, m.features);
+    p[13] = m.sourceId;
+    return total;
+}
+
+size_t BuildListSources(std::span<uint8_t> out) {
+    return BuildEmpty(out, MsgType::ListSources, 0);
+}
+
+size_t BuildSourceList(std::span<uint8_t> out, std::span<const SourceInfo> sources) {
+    const size_t n = sources.size() < kMaxSources ? sources.size() : kMaxSources;
+    // Đếm trước để biết tổng kích thước: WriteCommon cần payloadSize ngay từ đầu.
+    size_t payload = 1;
+    for (size_t i = 0; i < n; ++i) {
+        payload += 6 + Utf8TruncLen(sources[i].name, kMaxSourceNameBytes);
+    }
+    const size_t total = WriteCommon(out, MsgType::SourceList, 0, Chan::Control, 0, payload);
+    if (!total) return 0;
+
+    uint8_t* p = out.data() + kCommonHeaderSize;
+    *p++ = uint8_t(n);
+    for (size_t i = 0; i < n; ++i) {
+        const SourceInfo& s = sources[i];
+        const size_t nameLen = Utf8TruncLen(s.name, kMaxSourceNameBytes);
+        *p++ = s.sourceId;
+        PutU16(p, s.width);   p += 2;
+        PutU16(p, s.height);  p += 2;
+        *p++ = uint8_t(nameLen);
+        if (nameLen) std::memcpy(p, s.name.data(), nameLen);
+        p += nameLen;
+    }
     return total;
 }
 
@@ -194,7 +233,32 @@ std::optional<Hello> ParseHello(std::span<const uint8_t> payload) {
     m.maxHeight  = GetU16(p + 8);
     m.desiredFps = p[10];
     m.features   = GetU16(p + 11);
+    // sourceId thêm ở GĐ6; gói 13 byte của bản cũ vẫn đọc được, hiểu là nguồn 0.
+    m.sourceId   = payload.size() >= 14 ? p[13] : 0;
     return m;
+}
+
+size_t ParseSourceList(std::span<const uint8_t> payload, std::span<SourceInfo> out) {
+    if (payload.empty()) return 0;
+    size_t count = payload[0];
+    if (count > out.size()) count = out.size();
+
+    size_t off = 1;
+    size_t written = 0;
+    for (size_t i = 0; i < count; ++i) {
+        if (off + 6 > payload.size()) break; // gói cụt — trả về những gì đọc được
+        const uint8_t* p = payload.data() + off;
+        const size_t nameLen = p[5];
+        if (off + 6 + nameLen > payload.size()) break;
+        SourceInfo s;
+        s.sourceId = p[0];
+        s.width    = GetU16(p + 1);
+        s.height   = GetU16(p + 3);
+        s.name.assign(reinterpret_cast<const char*>(p + 6), nameLen);
+        out[written++] = std::move(s);
+        off += 6 + nameLen;
+    }
+    return written;
 }
 
 std::optional<HelloAck> ParseHelloAck(std::span<const uint8_t> payload) {

@@ -4,10 +4,12 @@
 
 #include <cstdlib>
 #include <string>
+#include <vector>
 
 #include "AgentLoop.h"
 #include "ClientLoop.h"
 #include "NetInfo.h"
+#include "SourcePickerDialog.h"
 #include "UdpSocket.h"
 #include "WindowPickerDialog.h"
 
@@ -55,9 +57,9 @@ struct MenuState {
 };
 
 void DoShare(MenuState& st) {
-    HWND target = nullptr;
+    std::vector<AgentSource> sources;
     bool allow = true;
-    if (!ShowWindowPickerDialog(st.hwnd, target, allow)) return;
+    if (!ShowWindowPickerDialog(st.hwnd, sources, allow)) return;
 
     AgentOptions ao;
     ao.port = uint16_t(GetEditUint(st.editPort, kDefaultPort));
@@ -66,7 +68,7 @@ void DoShare(MenuState& st) {
     ao.allowInput = allow;
 
     ShowWindow(st.hwnd, SW_HIDE);
-    RunAgent(target, ao);
+    RunAgent(sources, ao);
     ShowWindow(st.hwnd, SW_SHOW);
     SetForegroundWindow(st.hwnd);
 }
@@ -95,6 +97,14 @@ void DoConnect(MenuState& st) {
     }
     co.saveBmp = false;
     co.sendInput = SendMessageW(st.chkViewOnly, BM_GETCHECK, 0, 0) != BST_CHECKED;
+
+    // Hỏi host đang chia sẻ những gì rồi cho chọn. Host bản cũ (hoặc sai IP /
+    // firewall chặn) không trả lời -> cứ thử nguồn 0, ClientSession sẽ báo lỗi
+    // kết nối cụ thể hơn nhiều so với một hộp thoại "không thấy host".
+    std::vector<rgc::SourceInfo> available;
+    if (QueryHostSources(co.server, available) && !available.empty()) {
+        if (!ShowSourcePickerDialog(st.hwnd, available, co.sources)) return;
+    }
 
     ShowWindow(st.hwnd, SW_HIDE);
     RunClient(co);

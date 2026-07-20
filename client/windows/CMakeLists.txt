@@ -28,6 +28,7 @@ add_executable(client
     InputInjector.cpp
     NetTest.cpp
     WindowPickerDialog.cpp
+    SourcePickerDialog.cpp
     MainMenuWindow.cpp
 )
 
