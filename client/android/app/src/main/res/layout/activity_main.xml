@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:gravity="center"
+    android:padding="32dp"
+    android:background="#101014">
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/app_name"
+        android:textColor="#FFFFFF"
+        android:textSize="28sp"
+        android:layout_marginBottom="8dp" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="@string/host_address_label"
+        android:textColor="#9AA0A6"
+        android:textSize="14sp"
+        android:layout_marginBottom="24dp" />
+
+    <EditText
+        android:id="@+id/editAddr"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="@string/host_address_hint"
+        android:textColorHint="#5F6368"
+        android:textColor="#FFFFFF"
+        android:textSize="18sp"
+        android:inputType="text"
+        android:imeOptions="actionGo"
+        android:maxLines="1"
+        android:padding="14dp"
+        android:background="#1E1E24" />
+
+    <Button
+        android:id="@+id/btnConnect"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:text="@string/connect" />
+
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="28dp"
+        android:text="@string/emulator_hint"
+        android:textColor="#5F6368"
+        android:textSize="12sp" />
+</LinearLayout>

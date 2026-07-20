@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">RemoteGame</string>
+
+    <!-- Màn hình nhập địa chỉ -->
+    <string name="host_address_label">Address of the machine sharing its screen</string>
+    <string name="host_address_hint">192.168.1.10:47777</string>
+    <string name="connect">Connect</string>
+    <string name="emulator_hint">Emulators reach the host machine at 10.0.2.2</string>
+    <string name="enter_address_first">Enter a host address first</string>
+
+    <!-- Màn hình xem -->
+    <string name="connecting_to">Connecting to %1$s…</string>
+    <string name="invalid_address">Invalid address: %1$s</string>
+    <string name="disconnected">Disconnected: %1$s — tap to go back</string>
+</resources>

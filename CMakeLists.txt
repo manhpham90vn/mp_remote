@@ -14,4 +14,6 @@ add_subdirectory(core)
 if(WIN32)
     add_subdirectory(client/windows)
 endif()
-# Sau này: client/macos, client/linux, client/ios, client/android
+# client/android KHÔNG nằm ở đây: nó do Gradle/NDK dựng (client/android/, xem
+# docs/08-android-client.md), và CMakeLists của nó tự add_subdirectory(core).
+# Sau này: client/macos, client/linux, client/ios

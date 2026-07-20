@@ -8,6 +8,7 @@ vai trò: `client.exe --serve` = host (máy chạy game), `client.exe --connect 
 ```
 core/            phần dùng chung giữa các OS (protocol, thuần C++20)
 client/windows/  app Windows (một exe: host + client)
+client/android/  app Android (UI Kotlin + lõi C++ dùng chung; hiện chỉ vai trò client)
 docs/            tài liệu
 ```
 
@@ -29,9 +30,12 @@ cmake --preset x64-debug && cmake --build --preset x64-debug
 | [05-roadmap.md](05-roadmap.md) | Lộ trình giai đoạn + trạng thái |
 | [06-phase3-transport.md](06-phase3-transport.md) | Thiết kế chi tiết GĐ3 (transport) |
 | [07-phase4-input.md](07-phase4-input.md) | Thiết kế chi tiết GĐ4 (input) |
+| [08-android-client.md](08-android-client.md) | Client Android (NDK, view-only) |
 
 ## Trạng thái
 
 GĐ0 capture ✅ · GĐ1 encode (NVENC/MF) ✅ · GĐ2 loopback (~3.5 ms) ✅ ·
 GĐ3 transport ✅ (1 máy; chờ M3/M4 LAN) · GĐ4 input 🔶 (code + M1/M2 xong,
-chờ kiểm chứng 2 máy — xem 07 §9)
+chờ kiểm chứng 2 máy — xem 07 §9) · Client Android 🔶 (build + chạy được trên
+emulator, vòng đời vào/ra sạch ✅; **chưa từng nhận một frame video nào** —
+xem 08 §4)

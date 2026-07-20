@@ -35,6 +35,16 @@ compile_commands.json
 third_party/*
 !third_party/nvenc-13.0
 
+# ---- Android (client/android, Gradle + NDK) ----
+.gradle/
+.cxx/
+.externalNativeBuild/
+local.properties
+*.apk
+*.aab
+*.keystore
+.idea
+
 # ---- OS ----
 Thumbs.db
 Desktop.ini
