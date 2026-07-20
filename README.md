@@ -1,7 +1,7 @@
 # Remote Game Control
 
-Stream + điều khiển game từ xa. Mỗi OS **một exe duy nhất** (kiểu AnyDesk):
-`--serve` = host (máy chạy game), `--connect` = client (máy điều khiển).
+Stream + điều khiển game từ xa. Mỗi OS **một exe duy nhất** (kiểu AnyDesk), điều
+khiển hoàn toàn qua giao diện Win32 — không cần tham số dòng lệnh.
 
 ```
 core/            phần dùng chung giữa các OS (protocol, C++20 thuần)
@@ -27,19 +27,15 @@ make release           # release
 ## Run
 
 ```
-make run                                  # không tham số: menu chính kiểu AnyDesk — hiện IP máy này
-                                          #   theo từng card mạng, [s] chia sẻ ứng dụng (chọn cửa sổ),
-                                          #   [c] / gõ thẳng ip[:port] để kết nối tới máy khác
-make run ARGS="game.exe --serve"          # host: capture + NVENC → UDP (mặc định cổng 47777)
-make run ARGS="--connect 192.168.1.10"    # client: nhận video, decode, hiển thị + log chỉ số mỗi 1s
-make run ARGS="--nettest"                 # self-test offline packetize/reassemble/session/input (M1)
-make run ARGS="game.exe --serve --noinput"   # host: chỉ cho xem, không cho điều khiển
-make run ARGS="--connect 192.168.1.10 --noinput"  # client: chỉ xem, không gửi phím/chuột
-make run ARGS="notepad.exe --injecttest"  # dev: thử riêng đường bơm input (không cần mạng)
-make run ARGS="game.exe --save"           # capture + lưu frame BMP debug
-make run ARGS="game.exe --encode --out out.mp4 --bitrate 20 --fps 60"
-make run ARGS="game.exe --loopback"       # capture → encode → decode → render nội máy (đo trễ)
+make run       # chạy client.exe, mở thẳng man hình chính (GUI)
 ```
+
+Cửa sổ chính (`MainMenuWindow`, xem `client/windows/MainMenuWindow.h`) hiện địa chỉ
+IP máy này theo từng card mạng, ô chỉnh **Port/FPS/Bitrate**, nút **"Chia sẻ ứng
+dụng trên máy này"** (mở hộp thoại chọn cửa sổ nguồn — `WindowPickerDialog.h` — rồi
+làm host) và ô nhập IP + nút **"Kết nối"** để làm client. Checkbox "Cho phép người
+kia điều khiển" nằm ngay trong hộp thoại chọn cửa sổ; checkbox "Chỉ xem, không gửi
+input" nằm cạnh nút Kết nối.
 
 Giai đoạn 3 đã chạy được trên 1 máy (M1+M2); còn kiểm chứng 2 máy LAN (M3/M4) — xem
 `docs/06-phase3-transport.md` §8 và tiến độ trong `docs/05-roadmap.md`. Máy host lần đầu
@@ -48,6 +44,8 @@ cần mở firewall: `netsh advfirewall firewall add rule name="RemoteGame" dir=
 ## Điều khiển từ xa (giai đoạn 4)
 
 Input bật sẵn: gõ phím / di chuột trên cửa sổ preview của client là điều khiển máy host.
+Cửa sổ preview có sẵn 2 nút overlay góc trên-phải (khoá chuột / tạm dừng) đi cùng đường
+với phím tắt bên dưới — bấm nút hoặc bấm phím đều được, trạng thái luôn khớp nhau.
 
 - `F9` khoá/thả chuột — **bắt buộc bật cho game FPS** (gửi chuột tương đối thay vì toạ độ).
 - `F10` tạm dừng/tiếp tục gửi input.

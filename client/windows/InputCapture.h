@@ -40,6 +40,11 @@ public:
     bool enabled() const { return enabled_; }
     bool relativeMode() const { return relative_; }
 
+    // GD5: cung duong voi phim tat F9/F10, de nut bam tren overlay preview goi
+    // truc tiep (khong lap lai logic).
+    void ToggleRelativeMode(); // == F9
+    void TogglePause();        // == F10
+
 private:
     void SetRelativeMode(bool on);
     void Emit(rgc::InputType type, int32_t a, int32_t b, uint8_t state, uint8_t absolute);

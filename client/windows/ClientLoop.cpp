@@ -21,6 +21,7 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -79,6 +80,11 @@ int RunClient(const ClientOptions& opt) {
     InputCapture input;
     std::mutex inputMutex;
     std::vector<rgc::InputEvent> inputQueue;
+
+    // GD5: dong so lieu cho overlay tren cua so preview - ghi tu luong Recv, doc
+    // tu luong Main (giong mo hinh inputQueue/inputMutex o tren).
+    std::mutex statsMutex;
+    std::wstring statusText;
 
     std::thread recv([&] {
         std::unique_ptr<rgc::Reassembler> reasm; // tao sau khi biet fps dam phan
@@ -209,6 +215,19 @@ int RunClient(const ClientOptions& opt) {
                             lossPct,
                             session.lastRttUs() / 1000.0,
                             e2e >= 0 ? e2e / 1000.0 : 0.0);
+
+                // GD5: cung so lieu do, cho overlay tren cua so preview (luong Main
+                // doc o duoi, co khoa nhe - giong het mo hinh inputQueue/inputMutex).
+                wchar_t statusBuf[160];
+                swprintf(statusBuf, 160,
+                    L"%2.0f fps | %5.0f kbps | mat %4.1f%% goi | RTT %4.1f ms | e2e ~%4.1f ms",
+                    stRendered / secs, stBytes * 8.0 / 1000.0 / secs, lossPct,
+                    session.lastRttUs() / 1000.0, e2e >= 0 ? e2e / 1000.0 : 0.0);
+                {
+                    std::lock_guard<std::mutex> lk(statsMutex);
+                    statusText = statusBuf;
+                }
+
                 lastStats = st;
                 stRendered = 0;
                 stBytes = 0;
@@ -221,6 +240,7 @@ int RunClient(const ClientOptions& opt) {
     });
 
     // --- Thread Main: tao preview khi biet kich thuoc, bom message ---
+    std::wstring lastAppliedStatus; // tranh goi SetWindowText moi vong khi khong doi
     while (!quit.load() && !g_ctrlC.load()) {
         renderer.Pump();
         if (!rendererReady.load() && negW.load()) {
@@ -240,6 +260,12 @@ int RunClient(const ClientOptions& opt) {
                         inputQueue.push_back(e);
                     })) {
                     input.SetEnabled(true);
+                    // GD5: 2 nut overlay di dung duong voi phim tat F9/F10.
+                    renderer.SetCommandHook([&](int id) {
+                        if (id == Renderer::kBtnLock) input.ToggleRelativeMode();
+                        else if (id == Renderer::kBtnPause) input.TogglePause();
+                        renderer.SetToggleState(input.relativeMode(), !input.enabled());
+                    });
                 }
             } else {
                 std::printf("[Client] CHI XEM - khong gui input (--noinput).\n");
@@ -247,6 +273,19 @@ int RunClient(const ClientOptions& opt) {
             rendererReady.store(true, std::memory_order_release);
         }
         if (renderer.Closed()) { quit.store(true); break; }
+
+        // GD5: dong so lieu tu luong Recv -> nhan overlay (chi khi da co cua so).
+        if (rendererReady.load(std::memory_order_relaxed)) {
+            std::wstring t;
+            {
+                std::lock_guard<std::mutex> lk(statsMutex);
+                t = statusText;
+            }
+            if (t != lastAppliedStatus) {
+                renderer.SetStatusText(t.c_str());
+                lastAppliedStatus = t;
+            }
+        }
         Sleep(2);
     }
 

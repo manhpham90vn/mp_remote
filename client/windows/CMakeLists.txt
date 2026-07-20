@@ -27,6 +27,8 @@ add_executable(client
     InputCapture.cpp
     InputInjector.cpp
     NetTest.cpp
+    WindowPickerDialog.cpp
+    MainMenuWindow.cpp
 )
 
 target_compile_definitions(client PRIVATE UNICODE _UNICODE _CONSOLE)

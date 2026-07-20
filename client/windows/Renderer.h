@@ -44,6 +44,22 @@ public:
     using MessageHook = std::function<bool(HWND, UINT, WPARAM, LPARAM)>;
     void SetMessageHook(MessageHook hook);
 
+    // GD5: overlay tren cua so preview - 2 nut goc tren-phai. Renderer khong
+    // biet gi ve ngu nghia khoa chuot/tam dung, chi bao id nut vua bam ra ngoai
+    // (giong SetMessageHook), giong het duong phim tat F9/F10.
+    static constexpr int kBtnLock  = 1001; // == F9 (khoa/tha chuot tuong doi)
+    static constexpr int kBtnPause = 1002; // == F10 (tam dung/tiep tuc gui input)
+    using CommandHook = std::function<void(int id)>;
+    void SetCommandHook(CommandHook hook);
+
+    // Dong chu so lieu (fps/kbps/mat goi/RTT/e2e) hien goc tren-trai cua so.
+    // Chi goi tu luong da Init/Pump.
+    void SetStatusText(const wchar_t* text);
+
+    // Dong bo trang thai 2 nut voi InputCapture khi nguoi dung doi bang phim tat
+    // thay vi click. Chi goi tu luong da Init/Pump.
+    void SetToggleState(bool locked, bool paused);
+
     // HWND cua so preview (nullptr neu chua Init) - de dang ky Raw Input.
     HWND Hwnd() const;
 

@@ -33,6 +33,11 @@ constexpr wchar_t kWndClass[] = L"LoopbackPreviewWnd";
 
 struct Renderer::Impl {
     HWND                                  hwnd = nullptr;
+    HWND                                  statusLabel = nullptr;
+    HWND                                  btnLock = nullptr;
+    HWND                                  btnPause = nullptr;
+    HBRUSH                                labelBrush = nullptr; // nen dong so lieu
+    Renderer::CommandHook                 cmdHook;    // GD5: nut overlay -> ben ngoai
     ComPtr<ID3D11Device>                  device;
     ComPtr<ID3D11DeviceContext>           context;
     ComPtr<IDXGISwapChain1>               swapchain;
@@ -53,7 +58,8 @@ struct Renderer::Impl {
     Renderer::MessageHook msgHook;      // chi doc/ghi tren luong message (main)
 
     ~Impl() {
-        if (hwnd) DestroyWindow(hwnd);
+        if (hwnd) DestroyWindow(hwnd); // huy ca child (label + 2 nut)
+        if (labelBrush) DeleteObject(labelBrush);
     }
 
     static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -68,8 +74,55 @@ struct Renderer::Impl {
         case WM_KEYDOWN:
             if (wp == VK_ESCAPE && self) self->closed.store(true);
             return 0;
+        case WM_CTLCOLORSTATIC:
+            // Nen dong so lieu: chu sang tren nen toi de doc duoc tren video.
+            if (self && (HWND)lp == self->statusLabel) {
+                HDC hdc = (HDC)wp;
+                SetTextColor(hdc, RGB(240, 240, 240));
+                SetBkColor(hdc, RGB(20, 20, 20));
+                return (LRESULT)self->labelBrush;
+            }
+            break;
+        case WM_COMMAND:
+            // GD5: 2 nut overlay (kBtnLock/kBtnPause) -> bao ra ngoai, giong het
+            // duong phim tat F9/F10. Renderer khong tu doi trang thai nut - ben
+            // ngoai goi lai SetToggleState() sau khi xu ly xong.
+            if (self && self->cmdHook && HIWORD(wp) == BN_CLICKED) {
+                const int id = LOWORD(wp);
+                if (id == Renderer::kBtnLock || id == Renderer::kBtnPause)
+                    self->cmdHook(id);
+            }
+            return 0;
         }
         return DefWindowProcW(h, msg, wp, lp);
+    }
+
+    // GD5: dong so lieu goc tren-trai + 2 nut khoa chuot/tam dung goc tren-phai,
+    // de len tren video bang child window thuong - DWM tu ghep, khong can can
+    // thiep vao swapchain. Goi sau khi `hwnd` + clientW/clientH da co.
+    void CreateOverlay() {
+        labelBrush = CreateSolidBrush(RGB(20, 20, 20));
+        const HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+
+        const int btnW = 130, btnH = 24, pad = 8;
+        statusLabel = CreateWindowExW(0, L"STATIC", L"",
+            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
+            pad, pad, (int)clientW > 2 * (btnW + pad) + 400
+                ? 400 : (int)clientW - 2 * (btnW + pad) - pad,
+            btnH, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
+
+        btnLock = CreateWindowExW(0, L"BUTTON", L"\U0001F512 Khoa chuot (F9)",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_PUSHLIKE,
+            (int)clientW - pad - 2 * btnW - pad, pad, btnW, btnH,
+            hwnd, (HMENU)(INT_PTR)Renderer::kBtnLock, GetModuleHandleW(nullptr), nullptr);
+
+        btnPause = CreateWindowExW(0, L"BUTTON", L"⏸ Tam dung (F10)",
+            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_PUSHLIKE,
+            (int)clientW - pad - btnW, pad, btnW, btnH,
+            hwnd, (HMENU)(INT_PTR)Renderer::kBtnPause, GetModuleHandleW(nullptr), nullptr);
+
+        for (HWND c : { statusLabel, btnLock, btnPause })
+            if (c) SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
     }
 
     bool Init(ID3D11Device* dev, uint32_t srcW, uint32_t srcH, const wchar_t* title) {
@@ -108,6 +161,7 @@ struct Renderer::Impl {
         if (!hwnd) { std::printf("[Renderer] CreateWindow that bai.\n"); return false; }
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)this);
         ShowWindow(hwnd, SW_SHOW);
+        CreateOverlay();
 
         // Swapchain flip-model tren chinh device dung chung.
         ComPtr<IDXGIDevice> dxgiDev;
@@ -235,6 +289,22 @@ void Renderer::RequestDumpBmp(const std::string& path) {
 
 void Renderer::SetMessageHook(MessageHook hook) {
     if (impl_) impl_->msgHook = std::move(hook);
+}
+
+void Renderer::SetCommandHook(CommandHook hook) {
+    if (impl_) impl_->cmdHook = std::move(hook);
+}
+
+void Renderer::SetStatusText(const wchar_t* text) {
+    if (impl_ && impl_->statusLabel) SetWindowTextW(impl_->statusLabel, text);
+}
+
+void Renderer::SetToggleState(bool locked, bool paused) {
+    if (!impl_) return;
+    if (impl_->btnLock)
+        SendMessageW(impl_->btnLock, BM_SETCHECK, locked ? BST_CHECKED : BST_UNCHECKED, 0);
+    if (impl_->btnPause)
+        SendMessageW(impl_->btnPause, BM_SETCHECK, paused ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 HWND Renderer::Hwnd() const { return impl_ ? impl_->hwnd : nullptr; }

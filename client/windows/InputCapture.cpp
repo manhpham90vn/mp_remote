@@ -81,6 +81,16 @@ void InputCapture::SetEnabled(bool on) {
     if (!on) SetRelativeMode(false);
 }
 
+void InputCapture::ToggleRelativeMode() {
+    if (enabled_) SetRelativeMode(!relative_);
+}
+
+void InputCapture::TogglePause() {
+    enabled_ = !enabled_;
+    if (!enabled_) SetRelativeMode(false);
+    std::printf("[Input] %s gui input.\n", enabled_ ? "TIEP TUC" : "TAM DUNG");
+}
+
 void InputCapture::SetRelativeMode(bool on) {
     if (relative_ == on) return;
     relative_ = on;
@@ -144,15 +154,11 @@ void InputCapture::OnRawInput(LPARAM lp) {
 
         // Phim dieu khien cuc bo: xu ly o day, KHONG gui di.
         if (kb.VKey == kToggleRelativeKey) {
-            if (down && enabled_) SetRelativeMode(!relative_);
+            if (down) ToggleRelativeMode();
             return;
         }
         if (kb.VKey == VK_F10) {
-            if (down) {
-                enabled_ = !enabled_;
-                if (!enabled_) SetRelativeMode(false);
-                std::printf("[Input] %s gui input.\n", enabled_ ? "TIEP TUC" : "TAM DUNG");
-            }
+            if (down) TogglePause();
             return;
         }
 
