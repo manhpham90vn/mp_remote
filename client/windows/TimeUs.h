@@ -1,6 +1,6 @@
 #pragma once
-// Dong ho don dieu micro giay (QPC) - dung lam nowUs bom vao core (rgc) va lam
-// timestamp video phia agent. Chung cho main/AgentLoop/ClientLoop.
+// Đồng hồ đơn điệu micro giây (QPC) - dùng làm nowUs bơm vào core (rgc) và làm
+// timestamp video phía agent. Chung cho main/AgentLoop/ClientLoop.
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>

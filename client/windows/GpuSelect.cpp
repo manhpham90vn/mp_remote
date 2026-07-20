@@ -30,7 +30,7 @@ static GpuVendor VendorFromId(UINT vendorId) {
     }
 }
 
-// Co gang tao device tren mot adapter cu the (nullptr = WARP).
+// Cố gắng tạo device trên một adapter cụ thể (nullptr = WARP).
 static bool TryCreateOnAdapter(IDXGIAdapter1* adapter, D3D_DRIVER_TYPE driverType,
                                GpuChoice& out) {
     const UINT flags = D3D11_CREATE_DEVICE_BGRA_SUPPORT   // WGC + video
@@ -50,20 +50,20 @@ static bool TryCreateOnAdapter(IDXGIAdapter1* adapter, D3D_DRIVER_TYPE driverTyp
 bool CreateBestDevice(const std::vector<GpuVendor>& preference, GpuChoice& out) {
     ComPtr<IDXGIFactory1> factory;
     if (FAILED(CreateDXGIFactory1(IID_PPV_ARGS(&factory)))) {
-        std::printf("CreateDXGIFactory1 that bai.\n");
+        std::printf("CreateDXGIFactory1 failed.\n");
         return false;
     }
 
-    // Thu tung vendor theo thu tu uu tien; voi moi vendor, quet cac adapter.
+    // Thử từng vendor theo thứ tự ưu tiên; với mỗi vendor, quét các adapter.
     for (GpuVendor want : preference) {
         ComPtr<IDXGIAdapter1> adapter;
         for (UINT i = 0; factory->EnumAdapters1(i, adapter.ReleaseAndGetAddressOf()) != DXGI_ERROR_NOT_FOUND; ++i) {
             DXGI_ADAPTER_DESC1 desc{};
             adapter->GetDesc1(&desc);
-            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue; // bo WARP o vong nay
+            if (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) continue; // bỏ WARP ở vòng này
             if (VendorFromId(desc.VendorId) != want) continue;
 
-            // Voi adapter tuong minh phai dung DRIVER_TYPE_UNKNOWN.
+            // Với adapter tường minh phải dùng DRIVER_TYPE_UNKNOWN.
             if (TryCreateOnAdapter(adapter.Get(), D3D_DRIVER_TYPE_UNKNOWN, out)) {
                 out.description = desc.Description;
                 out.vendor = want;
@@ -73,8 +73,8 @@ bool CreateBestDevice(const std::vector<GpuVendor>& preference, GpuChoice& out) 
         }
     }
 
-    // Rot ve WARP (software) - "CPU".
-    std::printf("Khong co GPU phan cung uu tien; rot ve WARP (software).\n");
+    // Rớt về WARP (software) - "CPU".
+    std::printf("No preferred hardware GPU found; falling back to WARP (software).\n");
     if (TryCreateOnAdapter(nullptr, D3D_DRIVER_TYPE_WARP, out)) {
         out.description = L"WARP (software rasterizer)";
         out.vendor = GpuVendor::Microsoft;

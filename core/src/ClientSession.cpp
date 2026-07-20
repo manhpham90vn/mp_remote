@@ -1,6 +1,6 @@
 #include "rgc/ClientSession.h"
 
-#include "rgc/HostSession.h" // kSessionTimeoutUs dung chung hai phia
+#include "rgc/HostSession.h" // kSessionTimeoutUs dùng chung hai phía
 
 namespace rgc {
 
@@ -24,7 +24,7 @@ bool ClientSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
         if (!m) return false;
         if (state_ != State::Hello) return true; // ACK phát lại — đã xử lý rồi
         if (m->codec == Codec::Rejected) {
-            Die("host tu choi (dang ban hoac codec khong khop)");
+            Die("host rejected (busy or codec mismatch)");
             return false;
         }
         sessionId_ = m->sessionId;
@@ -53,7 +53,7 @@ bool ClientSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
     }
     case MsgType::Bye:
         if (h->sessionId != sessionId_ || sessionId_ == 0) return false;
-        Die("host ket thuc phien (BYE)");
+        Die("host ended the session (BYE)");
         return false;
     default:
         return false;
@@ -77,7 +77,7 @@ void ClientSession::Tick(uint64_t nowUs) {
     case State::Dead:
         return;
     case State::Hello:
-        if (nowUs - startedUs_ > kHelloGiveUpUs) { Die("khong ket noi duoc (het gio)"); return; }
+        if (nowUs - startedUs_ > kHelloGiveUpUs) { Die("could not connect (timed out)"); return; }
         if (nowUs - lastSentUs_ >= kHelloRetryUs) { lastSentUs_ = nowUs; SendHello(); }
         return;
     case State::Starting:
@@ -87,7 +87,7 @@ void ClientSession::Tick(uint64_t nowUs) {
         break;
     }
 
-    if (nowUs - lastRecvUs_ > kSessionTimeoutUs) { Die("mat lien lac voi host (timeout)"); return; }
+    if (nowUs - lastRecvUs_ > kSessionTimeoutUs) { Die("lost contact with host (timeout)"); return; }
 
     if (nowUs - lastPingUs_ >= kPingIntervalUs) {
         lastPingUs_ = nowUs;

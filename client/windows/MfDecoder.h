@@ -1,16 +1,16 @@
 #pragma once
 //
-// Backend decoder dung Media Foundation (H.264 decoder MFT + D3D11VA).
+// Backend decoder dùng Media Foundation (H.264 decoder MFT + D3D11VA).
 //
-// Vi sao MF cho decode:
-//   - Co san trong Windows SDK, khong can SDK ngoai (khac voi NVDEC).
-//   - MFT cua Microsoft la D3D11-aware: gan DXGI device manager la no giai ma
-//     bang hardware (D3D11VA) va tra texture NV12 ngay trong VRAM - zero-copy
+// Vì sao MF cho decode:
+//   - Có sẵn trong Windows SDK, không cần SDK ngoài (khác với NVDEC).
+//   - MFT của Microsoft là D3D11-aware: gắn DXGI device manager là nó giải mã
+//     bằng hardware (D3D11VA) và trả texture NV12 ngay trong VRAM - zero-copy
 //     sang Renderer.
-//   - CODECAPI_AVLowLatencyMode = TRUE de MFT tra frame ngay, khong giu buffer.
+//   - CODECAPI_AVLowLatencyMode = TRUE để MFT trả frame ngay, không giữ buffer.
 //
-// Dung MFT truc tiep (ProcessInput/ProcessOutput dong bo) thay vi Source Reader
-// vi dau vao la NAL tho tu encoder/mang, khong phai file container.
+// Dùng MFT trực tiếp (ProcessInput/ProcessOutput đồng bộ) thay vì Source Reader
+// vì đầu vào là NAL thô từ encoder/mạng, không phải file container.
 //
 #include "IVideoDecoder.h"
 

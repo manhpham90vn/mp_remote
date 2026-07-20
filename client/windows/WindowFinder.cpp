@@ -24,7 +24,7 @@ std::wstring BaseNameLower(const std::wstring& path) {
     return name;
 }
 
-// Ten exe (chu thuong) cua process so huu cua so; rong neu khong doc duoc.
+// Tên exe (chữ thường) của process sở hữu cửa sổ; rỗng nếu không đọc được.
 std::wstring ExeNameOfWindow(HWND hwnd, DWORD* outPid = nullptr) {
     DWORD pid = 0;
     GetWindowThreadProcessId(hwnd, &pid);
@@ -42,7 +42,7 @@ std::wstring ExeNameOfWindow(HWND hwnd, DWORD* outPid = nullptr) {
     return name;
 }
 
-// UWP/app bi treo van "visible" nhung bi DWM cloak - khong capture duoc.
+// UWP/app bị treo vẫn "visible" nhưng bị DWM cloak - không capture được.
 bool IsCloaked(HWND hwnd) {
     DWORD cloaked = 0;
     return SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked)))

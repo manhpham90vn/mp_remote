@@ -18,10 +18,10 @@ constexpr USHORT kUsagePageGeneric = 0x01;
 constexpr USHORT kUsageMouse       = 0x02;
 constexpr USHORT kUsageKeyboard    = 0x06;
 
-constexpr int kToggleRelativeKey = VK_F9; // bat/tat khoa chuot (che do tuong doi)
+constexpr int kToggleRelativeKey = VK_F9; // bật/tắt khóa chuột (chế độ tương đối)
 
-// Toa do client -> 0..65535. Dung (n-1) lam mau so de canh phai/duoi dat dung
-// 65535, khong bi hut mot pixel khi host quy doi nguoc.
+// Tọa độ client -> 0..65535. Dùng (n-1) làm mẫu số để cạnh phải/dưới đạt đúng
+// 65535, không bị hụt một pixel khi host quy đổi ngược.
 int32_t Normalize(int v, uint32_t extent) {
     if (extent <= 1) return 0;
     if (v < 0) v = 0;
@@ -36,10 +36,10 @@ bool InputCapture::Attach(HWND hwnd, Sink sink) {
     hwnd_ = hwnd;
     sink_ = std::move(sink);
 
-    // Khong dung RIDEV_NOLEGACY: van can message thuong (WM_MOUSEMOVE cho che do
-    // tuyet doi, WM_CLOSE, keo cua so...). Khong dung RIDEV_INPUTSINK: chi bat
-    // input khi cua so preview dang focus - nguoi dung alt-tab ra ngoai thi go
-    // vao may minh nhu binh thuong.
+    // Không dùng RIDEV_NOLEGACY: vẫn cần message thường (WM_MOUSEMOVE cho chế độ
+    // tuyệt đối, WM_CLOSE, kéo cửa sổ...). Không dùng RIDEV_INPUTSINK: chỉ bắt
+    // input khi cửa sổ preview đang focus - người dùng alt-tab ra ngoài thì gõ
+    // vào máy mình như bình thường.
     RAWINPUTDEVICE rid[2] = {};
     rid[0].usUsagePage = kUsagePageGeneric;
     rid[0].usUsage     = kUsageMouse;
@@ -48,20 +48,20 @@ bool InputCapture::Attach(HWND hwnd, Sink sink) {
     rid[1].usUsage     = kUsageKeyboard;
     rid[1].hwndTarget  = hwnd;
     if (!RegisterRawInputDevices(rid, 2, sizeof(RAWINPUTDEVICE))) {
-        std::printf("[Input] RegisterRawInputDevices that bai: %lu\n", GetLastError());
+        std::printf("[Input] RegisterRawInputDevices failed: %lu\n", GetLastError());
         return false;
     }
     attached_ = true;
-    std::printf("[Input] Dang lai ban phim + chuot toi may host.\n");
-    std::printf("[Input]   F9  = khoa/tha chuot (che do tuong doi cho game FPS)\n");
-    std::printf("[Input]   F10 = tam dung/tiep tuc gui input\n");
+    std::printf("[Input] Capturing keyboard + mouse input to send to host.\n");
+    std::printf("[Input]   F9  = lock/release mouse (relative mode for FPS games)\n");
+    std::printf("[Input]   F10 = pause/resume sending input\n");
     return true;
 }
 
 void InputCapture::Detach() {
     if (!attached_) return;
     SetRelativeMode(false);
-    // Huy dang ky: usUsagePage/Usage nhu cu + RIDEV_REMOVE, hwndTarget phai NULL.
+    // Hủy đăng ký: usUsagePage/Usage như cũ + RIDEV_REMOVE, hwndTarget phải NULL.
     RAWINPUTDEVICE rid[2] = {};
     rid[0].usUsagePage = kUsagePageGeneric;
     rid[0].usUsage     = kUsageMouse;
@@ -88,7 +88,7 @@ void InputCapture::ToggleRelativeMode() {
 void InputCapture::TogglePause() {
     enabled_ = !enabled_;
     if (!enabled_) SetRelativeMode(false);
-    std::printf("[Input] %s gui input.\n", enabled_ ? "TIEP TUC" : "TAM DUNG");
+    std::printf("[Input] %s sending input.\n", enabled_ ? "RESUMED" : "PAUSED");
 }
 
 void InputCapture::SetRelativeMode(bool on) {
@@ -101,15 +101,15 @@ void InputCapture::SetRelativeMode(bool on) {
         ClientToScreen(hwnd_, &tl);
         ClientToScreen(hwnd_, &br);
         RECT screen{ tl.x, tl.y, br.x, br.y };
-        ClipCursor(&screen); // giu con tro trong cua so preview
+        ClipCursor(&screen); // giữ con trỏ trong cửa sổ preview
         while (ShowCursor(FALSE) >= 0) {}
         SetCapture(hwnd_);
-        std::printf("[Input] Da KHOA chuot (che do tuong doi). F9 de tha.\n");
+        std::printf("[Input] Mouse LOCKED (relative mode). Press F9 to release.\n");
     } else {
         ClipCursor(nullptr);
         while (ShowCursor(TRUE) < 0) {}
         if (GetCapture() == hwnd_ && buttonsDown_ == 0) ReleaseCapture();
-        std::printf("[Input] Da THA chuot (che do tuyet doi).\n");
+        std::printf("[Input] Mouse RELEASED (absolute mode).\n");
     }
 }
 
@@ -127,7 +127,7 @@ void InputCapture::Emit(rgc::InputType type, int32_t a, int32_t b,
 }
 
 void InputCapture::EmitButton(rgc::MouseButton btn, bool down) {
-    // Giu chuot khi nhan de van nhan duoc nut-nha ngoai vung cua so (keo tha).
+    // Giữ chuột khi nhấn để vẫn nhận được nút-nhả ngoài vùng cửa sổ (kéo thả).
     if (down) {
         if (buttonsDown_++ == 0) SetCapture(hwnd_);
     } else if (buttonsDown_ > 0) {
@@ -140,7 +140,7 @@ void InputCapture::OnRawInput(LPARAM lp) {
     UINT size = 0;
     if (GetRawInputData((HRAWINPUT)lp, RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER)) != 0)
         return;
-    // RAWINPUT co kich thuoc thay doi; buffer tinh du cho ca hai loai thiet bi.
+    // RAWINPUT có kích thước thay đổi; buffer tính đủ cho cả hai loại thiết bị.
     alignas(8) BYTE buf[sizeof(RAWINPUT) + 64];
     if (size > sizeof(buf)) return;
     if (GetRawInputData((HRAWINPUT)lp, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER)) != size)
@@ -149,10 +149,10 @@ void InputCapture::OnRawInput(LPARAM lp) {
 
     if (ri->header.dwType == RIM_TYPEKEYBOARD) {
         const RAWKEYBOARD& kb = ri->data.keyboard;
-        if (kb.VKey == 0xFF) return; // phim gia cua ban phim (vd. nua Pause)
+        if (kb.VKey == 0xFF) return; // phím giả của bàn phím (vd. nửa Pause)
         const bool down = (kb.Flags & RI_KEY_BREAK) == 0;
 
-        // Phim dieu khien cuc bo: xu ly o day, KHONG gui di.
+        // Phím điều khiển cục bộ: xử lý ở đây, KHÔNG gửi đi.
         if (kb.VKey == kToggleRelativeKey) {
             if (down) ToggleRelativeMode();
             return;
@@ -170,8 +170,8 @@ void InputCapture::OnRawInput(LPARAM lp) {
 
     if (ri->header.dwType == RIM_TYPEMOUSE && relative_) {
         const RAWMOUSE& m = ri->data.mouse;
-        // Chuot tuyet doi (may ao/RDP/bang ve) khong cho delta -> bo qua, che do
-        // tuyet doi (WM_MOUSEMOVE) van hoat dong dung cho cac thiet bi do.
+        // Chuột tuyệt đối (máy ảo/RDP/bảng vẽ) không cho delta -> bỏ qua, chế độ
+        // tuyệt đối (WM_MOUSEMOVE) vẫn hoạt động đúng cho các thiết bị đó.
         if (m.usFlags & MOUSE_MOVE_ABSOLUTE) return;
         if (m.lLastX || m.lLastY)
             Emit(rgc::InputType::MouseMove, m.lLastX, m.lLastY, 0, 0);
@@ -184,10 +184,10 @@ bool InputCapture::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
     case WM_INPUT:
         OnRawInput(lp);
-        return false; // WM_INPUT PHAI di tiep toi DefWindowProc de he thong don
+        return false; // WM_INPUT PHẢI đi tiếp tới DefWindowProc để hệ thống dọn
 
     case WM_MOUSEMOVE: {
-        if (relative_) return true; // delta lay tu Raw Input roi
+        if (relative_) return true; // delta lấy từ Raw Input rồi
         RECT r{};
         GetClientRect(hwnd_, &r);
         Emit(rgc::InputType::MouseMove,
@@ -215,8 +215,8 @@ bool InputCapture::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         Emit(rgc::InputType::MouseWheel, 0, GET_WHEEL_DELTA_WPARAM(wp), 0, 0);
         return true;
 
-    // Phim da lay qua WM_INPUT; nuot message thuong de Renderer khong dong cua so
-    // khi nguoi dung bam ESC trong game o may kia. (WM_CLOSE van dong duoc.)
+    // Phím đã lấy qua WM_INPUT; nuốt message thường để Renderer không đóng cửa sổ
+    // khi người dùng bấm ESC trong game ở máy kia. (WM_CLOSE vẫn đóng được.)
     case WM_KEYDOWN:
     case WM_KEYUP:
     case WM_SYSKEYDOWN:
@@ -225,7 +225,7 @@ bool InputCapture::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return enabled_;
 
     case WM_KILLFOCUS:
-        // Mat focus khi dang khoa chuot -> tha ra, khong thi nguoi dung ket con tro.
+        // Mất focus khi đang khóa chuột -> thả ra, không thì người dùng kẹt con trỏ.
         SetRelativeMode(false);
         return false;
     }

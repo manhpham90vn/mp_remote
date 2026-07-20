@@ -1,10 +1,10 @@
-// client.exe - MOT exe kieu AnyDesk chua ca hai vai tro (host + client).
+// client.exe - MỘT exe kiểu AnyDesk chứa cả hai vai trò (host + client).
 //
-// GD5: toan bo dieu khien qua GUI Win32 (MainMenuWindow.h) - khong con CLI.
+// GD5: toàn bộ điều khiển qua GUI Win32 (MainMenuWindow.h) - không còn CLI.
 // Build: CMake + Ninja (CMakePresets.json, preset x64-debug/x64-release).
-// Chay:  client.exe (khong tham so) -> mo man hinh chinh: nut "Chia se ung
-// dung" (mo WindowPickerDialog.h roi RunAgent) hoac o nhap IP + nut "Ket noi"
-// (RunClient). Bitrate/FPS/port chinh truc tiep trong cua so do.
+// Chạy:  client.exe (không tham số) -> mở màn hình chính: nút "Chia sẻ ứng
+// dụng" (mở WindowPickerDialog.h rồi RunAgent) hoặc ô nhập IP + nút "Kết nối"
+// (RunClient). Bitrate/FPS/port chỉnh trực tiếp trong cửa sổ đó.
 
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -19,10 +19,10 @@
 
 int main(int, char**) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    // UTF-8 cho console de wprintf in dung tieu de cua so co dau (tieng Viet...).
+    // UTF-8 cho console để wprintf in đúng tiêu đề cửa sổ có dấu (tiếng Việt...).
     std::setlocale(LC_ALL, ".UTF8");
     SetConsoleOutputCP(CP_UTF8);
-    // Log ra ngay ca khi stdout bi redirect (CRT full-buffer khi khong phai console).
+    // Log ra ngay cả khi stdout bị redirect (CRT full-buffer khi không phải console).
     setvbuf(stdout, nullptr, _IONBF, 0);
     capture::InitRuntime();
 

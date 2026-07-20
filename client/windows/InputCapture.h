@@ -1,21 +1,21 @@
 #pragma once
 //
-// InputCapture (GD4, phia CLIENT) - bat phim/chuot tren cua so preview roi
-// bien thanh rgc::InputEvent de gui di.
+// InputCapture (GD4, phía CLIENT) - bắt phím/chuột trên cửa sổ preview rồi
+// biến thành rgc::InputEvent để gửi đi.
 //
-// Hai che do chuot:
-//   TUYET DOI (mac dinh): WM_MOUSEMOVE -> toa do client chuan hoa 0..65535.
-//       Con tro chuot cua nguoi dung va con tro tren may host trung nhau -
-//       dung cho ung dung cua so, menu, game chien thuat.
-//   TUONG DOI (F9 bat/tat): delta tho tu Raw Input, con tro bi khoa + an.
-//       Bat buoc cho game FPS: game doc chuot tho va tu keo con tro ve giua,
-//       neu gui toa do tuyet doi thi camera se giat lien tuc.
+// Hai chế độ chuột:
+//   TUYỆT ĐỐI (mặc định): WM_MOUSEMOVE -> tọa độ client chuẩn hóa 0..65535.
+//       Con trỏ chuột của người dùng và con trỏ trên máy host trùng nhau -
+//       dùng cho ứng dụng cửa sổ, menu, game chiến thuật.
+//   TƯƠNG ĐỐI (F9 bật/tắt): delta thô từ Raw Input, con trỏ bị khóa + ẩn.
+//       Bắt buộc cho game FPS: game đọc chuột thô và tự kéo con trỏ về giữa,
+//       nếu gửi tọa độ tuyệt đối thì camera sẽ giật liên tục.
 //
-// Ban phim luon lay tu Raw Input de co SCANCODE. Game DirectInput/raw doc
-// scancode chu khong doc ma phim ao -> gui vk khong thoi la game khong nhan.
+// Bàn phím luôn lấy từ Raw Input để có SCANCODE. Game DirectInput/raw đọc
+// scancode chứ không đọc mã phím ảo -> gửi vk không thôi là game không nhận.
 //
-// Toan bo chay tren LUONG MESSAGE (main). Sink duoc goi ngay trong WndProc nen
-// phai nhe: chi day vao hang doi, khong gui socket o day.
+// Toàn bộ chạy trên LUỒNG MESSAGE (main). Sink được gọi ngay trong WndProc nên
+// phải nhẹ: chỉ đẩy vào hàng đợi, không gửi socket ở đây.
 //
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -28,20 +28,20 @@ class InputCapture {
 public:
     using Sink = std::function<void(const rgc::InputEvent&)>;
 
-    // Dang ky Raw Input cho cua so preview. Goi tren luong se bom message.
+    // Đăng ký Raw Input cho cửa sổ preview. Gọi trên luồng sẽ bơm message.
     bool Attach(HWND hwnd, Sink sink);
     void Detach();
 
-    // Goi tu WndProc TRUOC khi Renderer xu ly. true = da tieu thu message.
+    // Gọi từ WndProc TRƯỚC khi Renderer xử lý. true = đã tiêu thụ message.
     bool OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
 
-    // Tam dung/tiep tuc gui input (vd. chua STREAMING, hoac nguoi dung tat).
+    // Tạm dừng/tiếp tục gửi input (vd. chưa STREAMING, hoặc người dùng tắt).
     void SetEnabled(bool on);
     bool enabled() const { return enabled_; }
     bool relativeMode() const { return relative_; }
 
-    // GD5: cung duong voi phim tat F9/F10, de nut bam tren overlay preview goi
-    // truc tiep (khong lap lai logic).
+    // GD5: cùng đường với phím tắt F9/F10, để nút bấm trên overlay preview gọi
+    // trực tiếp (không lặp lại logic).
     void ToggleRelativeMode(); // == F9
     void TogglePause();        // == F10
 
@@ -56,5 +56,5 @@ private:
     bool enabled_  = false;
     bool relative_ = false;
     bool attached_ = false;
-    int  buttonsDown_ = 0; // dem nut dang giu -> biet khi nao nha SetCapture
+    int  buttonsDown_ = 0; // đếm nút đang giữ -> biết khi nào nhả SetCapture
 };

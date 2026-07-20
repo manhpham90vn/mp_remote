@@ -1,14 +1,14 @@
-// AgentLoop (--serve) - ghep chuoi GD2 voi mang GD3:
+// AgentLoop (--serve) - ghép chuỗi GD2 với mạng GD3:
 //
 //   Thread FrameArrived (WGC):  capture -> NVENC -> onPacket(NAL)
-//       -> neu session STREAMING: Packetizer.SendFrame -> sock.SendTo(peer)
-//       -> chua STREAMING: bo NAL (khong dem)
-//   Thread chinh (Recv):        recvfrom timeout 100ms -> HostSession.HandlePacket
-//       -> goi hop le: cap nhat peer theo dia chi nguon (roaming theo sessionId)
-//       -> moi vong: HostSession.Tick + in thong ke moi 1s
+//       -> nếu session STREAMING: Packetizer.SendFrame -> sock.SendTo(peer)
+//       -> chưa STREAMING: bỏ NAL (không đếm)
+//   Thread chính (Recv):        recvfrom timeout 100ms -> HostSession.HandlePacket
+//       -> gói hợp lệ: cập nhật peer theo địa chỉ nguồn (roaming theo sessionId)
+//       -> mỗi vòng: HostSession.Tick + in thống kê mỗi 1s
 //
-// ForceKeyframe la ATOMIC FLAG: dat tu thread Recv (onStart/onKeyframeRequest),
-// tieu thu o lan Encode ke tiep tren thread FrameArrived (docs/06 §4).
+// ForceKeyframe là ATOMIC FLAG: đặt từ thread Recv (onStart/onKeyframeRequest),
+// tiêu thụ ở lần Encode kế tiếp trên thread FrameArrived (docs/06 §4).
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS
@@ -61,13 +61,13 @@ int RunAgent(HWND target, const AgentOptions& opt) {
 
     GpuChoice gpu;
     if (!CreateBestDevice({ GpuVendor::Nvidia, GpuVendor::Intel, GpuVendor::Amd }, gpu)) {
-        std::printf("[Agent] Khong tao duoc D3D11 device.\n");
+        std::printf("[Agent] Failed to create D3D11 device.\n");
         return 1;
     }
     std::wprintf(L"[Agent] GPU: %ls [%ls]\n", gpu.description.c_str(), GpuVendorName(gpu.vendor));
     {
-        // Immediate context duoc dung tu 2 thread (FrameArrived copy cache,
-        // Recv encode lai frame tinh) -> bat multithread protection.
+        // Immediate context được dùng từ 2 thread (FrameArrived copy cache,
+        // Recv encode lại frame tĩnh) -> bật multithread protection.
         Microsoft::WRL::ComPtr<ID3D10Multithread> mt;
         if (SUCCEEDED(gpu.device.As(&mt))) mt->SetMultithreadProtected(TRUE);
     }
@@ -75,12 +75,12 @@ int RunAgent(HWND target, const AgentOptions& opt) {
     UdpSocket sock;
     if (!sock.Open(opt.port)) return 1;
     sock.SetRecvTimeout(100);
-    std::printf("[Agent] Dang nghe UDP cong %u. O may kia, mo client.exe va nhap mot trong:\n",
-                opt.port);
+    std::printf("[Agent] Listening on UDP port %u. On the other machine, open client.exe"
+                " and enter one of:\n", opt.port);
     for (const auto& a : ListLocalIPv4())
         std::wprintf(L"    %hs:%u    (%ls)\n", a.ip.c_str(), opt.port, a.name.c_str());
 
-    // --- Trang thai chia se giua thread FrameArrived va thread Recv ---
+    // --- Trạng thái chia sẻ giữa thread FrameArrived và thread Recv ---
     std::atomic<uint32_t> srcW{0}, srcH{0};
     std::atomic<bool>     netReady{false};   // session da tao xong (sau frame dau)
     std::atomic<bool>     failed{false};
@@ -89,21 +89,21 @@ int RunAgent(HWND target, const AgentOptions& opt) {
     std::atomic<uint64_t> bytesSent{0}, framesSent{0};
     std::atomic<uint32_t> captured{0};
 
-    std::unique_ptr<rgc::HostSession> session; // tao sau khi biet kich thuoc nguon
+    std::unique_ptr<rgc::HostSession> session; // tạo sau khi biết kích thước nguồn
     rgc::Packetizer packetizer;
-    std::atomic<uint32_t> nextFrameId{0}; // cham tu ca 2 thread (frame moi / re-encode tinh)
+    std::atomic<uint32_t> nextFrameId{0}; // chạm từ cả 2 thread (frame mới / re-encode tĩnh)
 
-    std::mutex encMutex; // bao ve encoder + cachedTex giua 2 thread
+    std::mutex encMutex; // bảo vệ encoder + cachedTex giữa 2 thread
     std::unique_ptr<IVideoEncoder> encoder;
 
-    // WGC chi phat frame khi noi dung DOI. Cache frame cuoi de khi client xin IDR
-    // ma nguon dang tinh (menu, man hinh dung im) van co cai de encode gui di —
-    // khong cache thi client join man hinh tinh se den vinh vien.
+    // WGC chỉ phát frame khi nội dung ĐỔI. Cache frame cuối để khi client xin IDR
+    // mà nguồn đang tĩnh (menu, màn hình đứng im) vẫn có cái để encode gửi đi —
+    // không cache thì client join màn hình tĩnh sẽ đen vĩnh viễn.
     Microsoft::WRL::ComPtr<ID3D11Texture2D> cachedTex;
     std::atomic<bool>     haveCached{false};
     std::atomic<uint64_t> lastFrameUs{0};
 
-    // NAL vua nen xong (thread FrameArrived) -> cat goi -> UDP toi client.
+    // NAL vừa nén xong (thread FrameArrived) -> cắt gói -> UDP tới client.
     auto onPacket = [&](const uint8_t* data, size_t size, uint64_t tsUs, bool keyframe) {
         if (!session || session->state() != rgc::HostSession::State::Streaming) return;
         const uint64_t pp = peerPacked.load(std::memory_order_acquire);
@@ -119,7 +119,7 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         if (pkts) framesSent.fetch_add(1, std::memory_order_relaxed);
     };
 
-    // Tao encoder neu chua co. GOI DUOI encMutex. false = backend khong dung duoc.
+    // Tạo encoder nếu chưa có. GỌI DƯỚI encMutex. false = backend không dùng được.
     auto ensureEncoder = [&](uint32_t w, uint32_t h) -> bool {
         if (encoder) return true;
         EncoderConfig cfg;
@@ -127,11 +127,11 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         cfg.height = h;
         cfg.fps = opt.fps;
         cfg.bitrateBps = opt.bitrateMbps * 1'000'000u;
-        cfg.outputPath.clear(); // khong file — NAL chi di qua onPacket
+        cfg.outputPath.clear(); // không file — NAL chỉ đi qua onPacket
         cfg.onPacket = onPacket;
         encoder = CreateEncoder(gpu.device.Get(), cfg);
         if (!encoder) {
-            std::printf("[Agent] GD3 can NVENC (MF chua xuat NAL) — dung.\n");
+            std::printf("[Agent] GD3 needs NVENC (MF doesn't emit NAL yet) — stopping.\n");
             failed.store(true);
             return false;
         }
@@ -144,7 +144,7 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         if (failed.load()) return;
 
         std::lock_guard<std::mutex> lk(encMutex);
-        // Luu ban sao frame cuoi (texture cua WGC chi song trong callback).
+        // Lưu bản sao frame cuối (texture của WGC chỉ sống trong callback).
         if (!cachedTex) {
             D3D11_TEXTURE2D_DESC d{};
             fi.texture->GetDesc(&d);
@@ -163,19 +163,19 @@ int RunAgent(HWND target, const AgentOptions& opt) {
 
         if (!netReady.load(std::memory_order_acquire)) return;
         if (!ensureEncoder(fi.width, fi.height)) return;
-        // Encode lien tuc ke ca khi chua co client (don gian, VBV on dinh);
-        // NAL bi bo o onPacket neu chua STREAMING.
+        // Encode liên tục kể cả khi chưa có client (đơn giản, VBV ổn định);
+        // NAL bị bỏ ở onPacket nếu chưa STREAMING.
         encoder->Encode(fi.texture, QpcUs(), forceIdr.exchange(false));
     };
 
     WindowCapture capture;
     if (!capture.Start(target, gpu.device.Get(), onFrame)) return 1;
 
-    // Doi frame dau de biet kich thuoc nguon (offer trong HELLO_ACK).
+    // Đợi frame đầu để biết kích thước nguồn (offer trong HELLO_ACK).
     for (int i = 0; i < 1000 && !srcW.load() && !capture.Closed() && !g_ctrlC.load(); ++i)
         Sleep(10);
     if (!srcW.load()) {
-        std::printf("[Agent] Khong nhan duoc frame dau tu cua so — dung.\n");
+        std::printf("[Agent] Did not receive first frame from window — stopping.\n");
         capture.Stop();
         return 1;
     }
@@ -185,37 +185,37 @@ int RunAgent(HWND target, const AgentOptions& opt) {
     offer.height     = uint16_t(srcH.load());
     offer.fps        = uint8_t(opt.fps);
     offer.bitrateBps = opt.bitrateMbps * 1'000'000u;
-    std::printf("[Agent] Nguon %ux%u @%ufps, %u Mbps. Cho client...\n",
+    std::printf("[Agent] Source %ux%u @%ufps, %u Mbps. Waiting for client...\n",
                 offer.width, offer.height, opt.fps, opt.bitrateMbps);
 
-    // GD4: bom input tu client vao cua so dang chia se. Chi thread Recv cham vao.
+    // GD4: bơm input từ client vào cửa sổ đang chia sẻ. Chỉ thread Recv chạm vào.
     InputInjector injector;
     if (opt.allowInput) {
         injector.SetEnabled(injector.Init(target));
-        std::printf("[Agent] Cho phep client dieu khien (chuot + ban phim).\n");
+        std::printf("[Agent] Client control allowed (mouse + keyboard).\n");
     } else {
         injector.SetEnabled(false);
-        std::printf("[Agent] CHI XEM - input tu client bi bo qua (--noinput).\n");
+        std::printf("[Agent] VIEW ONLY - input from client is ignored (--noinput).\n");
     }
 
-    NetAddr replyAddr; // dia chi nguon cua goi dang xu ly (chi thread Recv dung)
+    NetAddr replyAddr; // địa chỉ nguồn của gói đang xử lý (chỉ thread Recv dùng)
     rgc::HostCallbacks cb;
     cb.send = [&](std::span<const uint8_t> d) { sock.SendTo(replyAddr, d.data(), d.size()); };
     cb.onStart = [&] {
-        forceIdr.store(true); // IDR mo man (kem SPS/PPS — repeatSPSPPS=1)
-        std::printf("[Agent] Client START — bat dau day video.\n");
+        forceIdr.store(true); // IDR mở màn (kèm SPS/PPS — repeatSPSPPS=1)
+        std::printf("[Agent] Client START — beginning video push.\n");
     };
     cb.onKeyframeRequest = [&] { forceIdr.store(true); };
     cb.onInput = [&](const rgc::InputEvent& e) { injector.Apply(e); };
     cb.onDisconnect = [&] {
         peerPacked.store(0, std::memory_order_release);
-        injector.ReleaseAll(); // BAT BUOC: mat ket noi giua luc giu phim = ket phim
-        std::printf("[Agent] Client roi di (BYE/timeout) — cho client moi.\n");
+        injector.ReleaseAll(); // BẮT BUỘC: mất kết nối giữa lúc giữ phím = kẹt phím
+        std::printf("[Agent] Client left (BYE/timeout) — waiting for a new client.\n");
     };
     session = std::make_unique<rgc::HostSession>(cb, offer);
     netReady.store(true, std::memory_order_release);
 
-    // --- Vong Recv (thread chinh) ---
+    // --- Vòng Recv (thread chính) ---
     uint8_t buf[rgc::kMaxDatagram];
     uint64_t lastStatUs = QpcUs();
     uint32_t lastCaptured = 0;
@@ -225,11 +225,11 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         NetAddr from;
         const int n = sock.RecvFrom(buf, sizeof(buf), from);
         const uint64_t now = QpcUs();
-        if (n < 0) { std::printf("[Agent] Loi socket — dung.\n"); break; }
+        if (n < 0) { std::printf("[Agent] Socket error — stopping.\n"); break; }
         if (n > 0) {
             replyAddr = from;
             if (session->HandlePacket(std::span<const uint8_t>(buf, size_t(n)), now)) {
-                // Goi hop le thuoc phien — cap nhat peer (client roaming doi IP/port).
+                // Gói hợp lệ thuộc phiên — cập nhật peer (client roaming đổi IP/port).
                 const uint64_t pk = from.Pack();
                 if (peerPacked.load(std::memory_order_relaxed) != pk) {
                     peerPacked.store(pk, std::memory_order_release);
@@ -239,8 +239,8 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         }
         session->Tick(now);
 
-        // Yeu cau IDR dang treo ma nguon dang TINH (>200ms khong co FrameArrived —
-        // WGC chi phat khi noi dung doi) -> encode lai frame cache de client co hinh.
+        // Yêu cầu IDR đang treo mà nguồn đang TĨNH (>200ms không có FrameArrived —
+        // WGC chỉ phát khi nội dung đổi) -> encode lại frame cache để client có hình.
         if (session->state() == rgc::HostSession::State::Streaming &&
             forceIdr.load() && haveCached.load(std::memory_order_acquire) &&
             now - lastFrameUs.load(std::memory_order_relaxed) > 200'000) {
@@ -254,8 +254,8 @@ int RunAgent(HWND target, const AgentOptions& opt) {
             const uint32_t cap = captured.load();
             const uint64_t by = bytesSent.load(), fr = framesSent.load();
             const auto& ist = session->inputStats();
-            std::printf("[Agent] %-9s | capture %.0f fps | gui %.0f fps, %.0f kbps"
-                        " | input %llu (mat %llu)\n",
+            std::printf("[Agent] %-9s | capture %.0f fps | send %.0f fps, %.0f kbps"
+                        " | input %llu (lost %llu)\n",
                         StateName(session->state()),
                         (cap - lastCaptured) / secs,
                         (fr - lastFrames) / secs,
@@ -269,9 +269,9 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         }
     }
 
-    injector.ReleaseAll(); // thoat giua luc client dang giu phim -> nha ra
+    injector.ReleaseAll(); // thoát giữa lúc client đang giữ phím -> nhả ra
 
-    // Chia tay tu te: bao BYE cho client neu con phien.
+    // Chia tay tử tế: báo BYE cho client nếu còn phiên.
     if (session->state() != rgc::HostSession::State::Idle) {
         const uint64_t pp = peerPacked.load();
         if (pp) {
@@ -282,13 +282,13 @@ int RunAgent(HWND target, const AgentOptions& opt) {
         }
     }
 
-    capture.Stop(); // het callback roi moi don encoder
+    capture.Stop(); // hết callback rồi mới dọn encoder
     {
         std::lock_guard<std::mutex> lk(encMutex);
         if (encoder) encoder->Finish();
     }
     netReady.store(false);
-    std::printf("[Agent] Da dung. Tong: %llu frame gui, %.2f MB.\n",
+    std::printf("[Agent] Stopped. Total: %llu frames sent, %.2f MB.\n",
                 (unsigned long long)framesSent.load(), bytesSent.load() / 1e6);
     SetConsoleCtrlHandler(CtrlHandler, FALSE);
     return failed.load() ? 1 : 0;

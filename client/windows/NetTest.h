@@ -1,6 +1,6 @@
 #pragma once
-// Self-test M1 cua GD3: packetize -> (tron thu tu / bo goi / trung goi gia lap)
-// -> reassemble, cong voi mo phong handshake HostSession/ClientSession noi nhau
-// bang "day" trong bo nho. Chay hoan toan offline - khong can mang, khong GPU.
-// Tra ve 0 neu moi kiem tra dat.
+// Self-test M1 của GD3: packetize -> (trộn thứ tự / bỏ gói / trùng gói giả lập)
+// -> reassemble, cộng với mô phỏng handshake HostSession/ClientSession nối nhau
+// bằng "dây" trong bộ nhớ. Chạy hoàn toàn offline - không cần mạng, không GPU.
+// Trả về 0 nếu mọi kiểm tra đạt.
 int RunNetTest();

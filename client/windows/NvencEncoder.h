@@ -1,15 +1,15 @@
 #pragma once
 //
-// Backend encoder dung NVIDIA NVENC (Video Codec SDK).
+// Backend encoder dùng NVIDIA NVENC (Video Codec SDK).
 //
-// Vi sao NVENC cho Agent NVIDIA:
-//   - Do tre thap nhat (preset ULTRA_LOW_LATENCY), dung cho game streaming.
-//   - Xuat NAL Annex-B roi -> hop de packetize gui UDP (GD3).
-//   - forceKeyframe (FORCEIDR) chuan -> phuc hoi khi client mat goi.
-//   - Dang ky texture D3D11 truc tiep (zero-copy tu VRAM).
+// Vì sao NVENC cho Agent NVIDIA:
+//   - Độ trễ thấp nhất (preset ULTRA_LOW_LATENCY), dùng cho game streaming.
+//   - Xuất NAL Annex-B rời -> hợp để packetize gửi UDP (GD3).
+//   - forceKeyframe (FORCEIDR) chuẩn -> phục hồi khi client mất gói.
+//   - Đăng ký texture D3D11 trực tiếp (zero-copy từ VRAM).
 //
-// Nap nvEncodeAPI64.dll DONG (di kem driver) nen khong can .lib; chi can header SDK.
-// Giai doan 1: ghi NAL ra file .h264 (Annex-B) de kiem chung bang ffplay.
+// Nạp nvEncodeAPI64.dll ĐỘNG (đi kèm driver) nên không cần .lib; chỉ cần header SDK.
+// Giai đoạn 1: ghi NAL ra file .h264 (Annex-B) để kiểm chứng bằng ffplay.
 //
 #include "IVideoEncoder.h"
 

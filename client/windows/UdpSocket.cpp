@@ -41,24 +41,24 @@ UdpSocket::~UdpSocket() { Close(); }
 bool UdpSocket::Open(uint16_t localPort) {
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-        std::printf("[UDP] WSAStartup that bai.\n");
+        std::printf("[UDP] WSAStartup failed.\n");
         return false;
     }
     wsaInit_ = true;
 
     const SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
     if (s == INVALID_SOCKET) {
-        std::printf("[UDP] socket() that bai: %d\n", WSAGetLastError());
+        std::printf("[UDP] socket() failed: %d\n", WSAGetLastError());
         return false;
     }
 
-    // Windows: khi sendto truoc do gay ICMP "port unreachable", recvfrom se tra
-    // WSAECONNRESET mai mai. Tat hanh vi nay - UDP dung nghia la fire-and-forget.
+    // Windows: khi sendto trước đó gây ICMP "port unreachable", recvfrom sẽ trả
+    // WSAECONNRESET mãi mãi. Tắt hành vi này - UDP đúng nghĩa là fire-and-forget.
     BOOL off = FALSE;
     DWORD bytes = 0;
     WSAIoctl(s, SIO_UDP_CONNRESET, &off, sizeof(off), nullptr, 0, &bytes, nullptr, nullptr);
 
-    // Dem video bitrate cao: noi buffer nhan de khong rot goi khi thread ban decode.
+    // Đệm video bitrate cao: nới buffer nhận để không rớt gói khi thread bận decode.
     int rcvbuf = 4 * 1024 * 1024;
     setsockopt(s, SOL_SOCKET, SO_RCVBUF, (const char*)&rcvbuf, sizeof(rcvbuf));
 
@@ -67,7 +67,7 @@ bool UdpSocket::Open(uint16_t localPort) {
     local.sin_addr.s_addr = htonl(INADDR_ANY);
     local.sin_port = htons(localPort);
     if (bind(s, (sockaddr*)&local, sizeof(local)) == SOCKET_ERROR) {
-        std::printf("[UDP] bind(:%u) that bai: %d\n", localPort, WSAGetLastError());
+        std::printf("[UDP] bind(:%u) failed: %d\n", localPort, WSAGetLastError());
         closesocket(s);
         return false;
     }

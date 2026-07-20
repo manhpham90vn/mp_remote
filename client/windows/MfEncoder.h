@@ -1,17 +1,17 @@
 #pragma once
 //
-// Backend encoder dung thang H.264/HEVC Encoder MFT (Media Foundation), khong qua
-// IMFSinkWriter/container - de xuat duoc NAL Annex-B tho cho callback onPacket (streaming).
+// Backend encoder dùng thẳng H.264/HEVC Encoder MFT (Media Foundation), không qua
+// IMFSinkWriter/container - để xuất được NAL Annex-B thô cho callback onPacket (streaming).
 //
-// Vi sao MF cho agent khong-NVIDIA (Intel QSV / AMD VCE / software fallback):
-//   - Co san trong Windows SDK, khong can SDK hang thu ba.
-//   - MFTEnumEx tu tim MFT phu hop device D3D11 dang dung (uu tien HW nho SORTANDFILTER).
-//   - Dau vao NV12 tu chinh D3D11 device dang capture (VRAM) - tu chuyen mau BGRA->NV12
-//     bang D3D11 Video Processor (khong dong bo CPU).
-//   - MFT phan cung thuong BAT DONG BO (async) - phai unlock + bat su kien
-//     (IMFMediaEventGenerator) truoc khi goi ProcessInput/ProcessOutput.
-//   - SPS/PPS lay tu MF_MT_MPEG_SEQUENCE_HEADER cua kieu dau ra, tu chen truoc moi IDR
-//     (tuong duong repeatSPSPPS cua NVENC) de client join/phuc hoi giua chung decode duoc.
+// Vì sao MF cho agent không-NVIDIA (Intel QSV / AMD VCE / software fallback):
+//   - Có sẵn trong Windows SDK, không cần SDK hãng thứ ba.
+//   - MFTEnumEx tự tìm MFT phù hợp device D3D11 đang dùng (ưu tiên HW nhờ SORTANDFILTER).
+//   - Đầu vào NV12 từ chính D3D11 device đang capture (VRAM) - tự chuyển màu BGRA->NV12
+//     bằng D3D11 Video Processor (không đồng bộ CPU).
+//   - MFT phần cứng thường BẤT ĐỒNG BỘ (async) - phải unlock + bắt sự kiện
+//     (IMFMediaEventGenerator) trước khi gọi ProcessInput/ProcessOutput.
+//   - SPS/PPS lấy từ MF_MT_MPEG_SEQUENCE_HEADER của kiểu đầu ra, tự chèn trước mỗi IDR
+//     (tương đương repeatSPSPPS của NVENC) để client join/phục hồi giữa chừng decode được.
 //
 #include "IVideoEncoder.h"
 

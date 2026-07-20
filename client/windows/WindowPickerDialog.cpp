@@ -17,11 +17,11 @@ constexpr int kIdChkAllow = 102;
 constexpr int kIdOk       = 103;
 constexpr int kIdCancel   = 104;
 
-// Format giong het menu console cu: "[exe] title (WxH)" / "(thu nho)".
+// Format giống hệt menu console cũ: "[exe] title (WxH)" / "(thu nhỏ)".
 std::wstring FormatEntry(const WindowInfo& w) {
     wchar_t buf[400];
     if (w.minimized) {
-        swprintf(buf, 400, L"[%ls] %ls (thu nho)", w.exeName.c_str(), w.title.c_str());
+        swprintf(buf, 400, L"[%ls] %ls (minimized)", w.exeName.c_str(), w.title.c_str());
     } else {
         swprintf(buf, 400, L"[%ls] %ls (%ux%u)", w.exeName.c_str(), w.title.c_str(),
                  w.width, w.height);
@@ -43,7 +43,7 @@ void Repopulate(PickerState& st) {
     st.windows = ListCapturableWindows();
     SendMessageW(st.list, LB_RESETCONTENT, 0, 0);
     if (st.windows.empty()) {
-        SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)L"(Khong tim thay cua so nao de chia se)");
+        SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)L"(No windows found to share)");
         EnableWindow(GetDlgItem(st.hwnd, kIdOk), FALSE);
     } else {
         for (const auto& w : st.windows)
@@ -55,7 +55,7 @@ void Repopulate(PickerState& st) {
 
 void Confirm(PickerState& st) {
     const LRESULT sel = SendMessageW(st.list, LB_GETCURSEL, 0, 0);
-    if (sel == LB_ERR || (size_t)sel >= st.windows.size()) return; // khong chon gi
+    if (sel == LB_ERR || (size_t)sel >= st.windows.size()) return; // không chọn gì
     st.result = st.windows[(size_t)sel].hwnd;
     st.allowInput = SendMessageW(st.chkAllow, BM_GETCHECK, 0, 0) == BST_CHECKED;
     st.done = true;
@@ -91,7 +91,7 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
     wc.lpszClassName = kWndClass;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
-    RegisterClassW(&wc); // lan 2 tra ALREADY_EXISTS - khong sao
+    RegisterClassW(&wc); // lần 2 trả ALREADY_EXISTS - không sao
 
     constexpr int kW = 480, kH = 380;
     RECT ownerRect{};
@@ -103,7 +103,7 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
     const DWORD style = WS_POPUP | WS_CAPTION | WS_SYSMENU;
     RECT wr{ 0, 0, kW, kH };
     AdjustWindowRect(&wr, style, FALSE);
-    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kWndClass, L"Chon cua so de chia se",
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kWndClass, L"Select a window to share",
                                 style, x, y, wr.right - wr.left, wr.bottom - wr.top,
                                 owner, nullptr, wc.hInstance, nullptr);
     if (!dlg) return false;
@@ -123,12 +123,12 @@ bool ShowWindowPickerDialog(HWND owner, HWND& outTarget, bool& outAllowInput) {
     st.list = mk(L"LISTBOX", nullptr,
                  LBS_NOTIFY | LBS_HASSTRINGS | WS_VSCROLL | WS_BORDER,
                  12, 12, kW - 24, kH - 100, kIdList);
-    st.chkAllow = mk(L"BUTTON", L"Cho phep nguoi kia dieu khien chuot/ban phim",
+    st.chkAllow = mk(L"BUTTON", L"Allow the other person to control mouse/keyboard",
                       BS_AUTOCHECKBOX, 12, kH - 82, kW - 24, 20, kIdChkAllow);
     SendMessageW(st.chkAllow, BM_SETCHECK, BST_CHECKED, 0);
-    mk(L"BUTTON", L"Lam moi", 0, 12, kH - 52, 90, 26, kIdRefresh);
-    mk(L"BUTTON", L"Chon", BS_DEFPUSHBUTTON, kW - 24 - 180, kH - 52, 86, 26, kIdOk);
-    mk(L"BUTTON", L"Huy", 0, kW - 24 - 88, kH - 52, 86, 26, kIdCancel);
+    mk(L"BUTTON", L"Refresh", 0, 12, kH - 52, 90, 26, kIdRefresh);
+    mk(L"BUTTON", L"Select", BS_DEFPUSHBUTTON, kW - 24 - 180, kH - 52, 86, 26, kIdOk);
+    mk(L"BUTTON", L"Cancel", 0, kW - 24 - 88, kH - 52, 86, 26, kIdCancel);
 
     Repopulate(st);
     if (owner) EnableWindow(owner, FALSE);

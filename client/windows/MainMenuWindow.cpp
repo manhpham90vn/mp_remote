@@ -24,8 +24,8 @@ constexpr int kIdConnect     = 203;
 constexpr int kIdChkViewOnly = 204;
 constexpr int kIdExit        = 205;
 
-// Gia tri mac dinh khi o trong/nhap sai - giong het mac dinh --port/--fps/
-// --bitrate cu.
+// Giá trị mặc định khi ô trống/nhập sai - giống hệt mặc định --port/--fps/
+// --bitrate cũ.
 constexpr uint16_t kDefaultPort = 47777;
 constexpr uint32_t kDefaultFps = 60;
 constexpr uint32_t kDefaultBitrateMbps = 20;
@@ -76,11 +76,11 @@ void DoConnect(MenuState& st) {
     GetWindowTextW(st.editAddr, buf, 128);
     const std::wstring waddr = Trim(buf);
     if (waddr.empty()) {
-        MessageBoxW(st.hwnd, L"Nhap dia chi IP cua may host truoc (vi du: 192.168.1.10).",
+        MessageBoxW(st.hwnd, L"Enter the host machine's IP address first (e.g., 192.168.1.10).",
                     L"RemoteGame", MB_OK | MB_ICONWARNING);
         return;
     }
-    // Dia chi ip[:port] chi gom ASCII - thu hep tung ky tu la an toan.
+    // Địa chỉ ip[:port] chỉ gồm ASCII - thu hẹp từng ký tự là an toàn.
     std::string addr;
     addr.reserve(waddr.size());
     for (wchar_t c : waddr) addr.push_back(char(c));
@@ -88,8 +88,8 @@ void DoConnect(MenuState& st) {
     const uint16_t port = uint16_t(GetEditUint(st.editPort, kDefaultPort));
     ClientOptions co;
     if (!ParseNetAddr(addr, port, co.server)) {
-        const std::wstring msg = L"Dia chi khong hop le: \"" + waddr +
-            L"\"\n(vi du: 192.168.1.10 hoac 192.168.1.10:47777)";
+        const std::wstring msg = L"Invalid address: \"" + waddr +
+            L"\"\n(e.g., 192.168.1.10 or 192.168.1.10:47777)";
         MessageBoxW(st.hwnd, msg.c_str(), L"RemoteGame", MB_OK | MB_ICONERROR);
         return;
     }
@@ -138,7 +138,7 @@ int RunMainMenuWindow() {
     const DWORD style = WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
     RECT wr{ 0, 0, kW, kH };
     AdjustWindowRect(&wr, style, FALSE);
-    HWND hwnd = CreateWindowExW(0, kWndClass, L"RemoteGame - stream & dieu khien ung dung tu xa",
+    HWND hwnd = CreateWindowExW(0, kWndClass, L"RemoteGame - stream & remotely control an application",
                                  style, CW_USEDEFAULT, CW_USEDEFAULT,
                                  wr.right - wr.left, wr.bottom - wr.top,
                                  nullptr, nullptr, wc.hInstance, nullptr);
@@ -156,13 +156,13 @@ int RunMainMenuWindow() {
         return c;
     };
 
-    // Dia chi IP may nay - moi adapter mot dong, kem port de doc cho may kia go.
-    // Dong port hien thi lay gia tri mac dinh ban dau; sua o Port o duoi se ap
-    // dung cho phien Chia se/Ket noi tiep theo (khong tu cap nhat dong nay).
-    std::wstring addrText = L"Dia chi MAY NAY (doc cho nguoi o may kia nhap vao):\r\n";
+    // Địa chỉ IP máy này - mỗi adapter một dòng, kèm port để đọc cho máy kia gõ.
+    // Dòng port hiển thị lấy giá trị mặc định ban đầu; sửa ở Port ở dưới sẽ áp
+    // dụng cho phiên Chia sẻ/Kết nối tiếp theo (không tự cập nhật dòng này).
+    std::wstring addrText = L"THIS MACHINE's address (read aloud for the other person to type):\r\n";
     const auto addrs = ListLocalIPv4();
     if (addrs.empty()) {
-        addrText += L"(khong tim thay dia chi mang nao)";
+        addrText += L"(no network address found)";
     } else {
         for (const auto& a : addrs) {
             wchar_t line[160];
@@ -173,7 +173,7 @@ int RunMainMenuWindow() {
     }
     mk(L"STATIC", addrText.c_str(), SS_LEFT, 16, 12, kW - 32, 92, 0);
 
-    // Port / FPS / Bitrate - truoc day chi sua duoc bang co dong lenh.
+    // Port / FPS / Bitrate - trước đây chỉ sửa được bằng cờ dòng lệnh.
     mk(L"STATIC", L"Port", SS_LEFT, 16, 118, 40, 20, 0);
     st.editPort = mk(L"EDIT", L"47777", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
                       54, 116, 70, 24, kIdEditPort);
@@ -184,17 +184,17 @@ int RunMainMenuWindow() {
     st.editBitrate = mk(L"EDIT", L"20", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
                          338, 116, 50, 24, kIdEditBitrate);
 
-    mk(L"BUTTON", L"Chia se ung dung tren may nay (lam host)", BS_PUSHBUTTON,
+    mk(L"BUTTON", L"Share an application on this machine (act as host)", BS_PUSHBUTTON,
        16, 156, kW - 32, 32, kIdShare);
 
-    mk(L"STATIC", L"Ket noi toi may khac (ip[:port]):", SS_LEFT, 16, 204, kW - 32, 18, 0);
+    mk(L"STATIC", L"Connect to another machine (ip[:port]):", SS_LEFT, 16, 204, kW - 32, 18, 0);
     st.editAddr = mk(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 16, 224, kW - 32 - 110, 26, kIdEditAddr);
-    mk(L"BUTTON", L"Ket noi", BS_DEFPUSHBUTTON, kW - 16 - 100, 224, 100, 26, kIdConnect);
+    mk(L"BUTTON", L"Connect", BS_DEFPUSHBUTTON, kW - 16 - 100, 224, 100, 26, kIdConnect);
 
-    st.chkViewOnly = mk(L"BUTTON", L"Chi xem, khong gui input (ap dung khi Ket noi)",
+    st.chkViewOnly = mk(L"BUTTON", L"View only, don't send input (applies when connecting)",
                          BS_AUTOCHECKBOX, 16, 262, kW - 32, 20, kIdChkViewOnly);
 
-    mk(L"BUTTON", L"Thoat", BS_PUSHBUTTON, 16, kH - 60, 100, 28, kIdExit);
+    mk(L"BUTTON", L"Exit", BS_PUSHBUTTON, 16, kH - 60, 100, 28, kIdExit);
 
     ShowWindow(hwnd, SW_SHOW);
 

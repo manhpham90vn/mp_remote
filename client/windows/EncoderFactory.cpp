@@ -1,8 +1,8 @@
-// Factory chon backend encoder theo chuoi uu tien.
+// Factory chọn backend encoder theo chuỗi ưu tiên.
 //
-// Thu tu: NVENC (NVIDIA, do tre thap nhat) -> Media Foundation (NVIDIA/Intel/AMD/software).
-// Khop chuoi phan cung NVIDIA -> Intel -> CPU: neu khong co NVIDIA, NVENC Init that bai
-// va tu roi xuong MF (MF lai tu chon HW theo device, hoac software).
+// Thứ tự: NVENC (NVIDIA, độ trễ thấp nhất) -> Media Foundation (NVIDIA/Intel/AMD/software).
+// Khớp chuỗi phần cứng NVIDIA -> Intel -> CPU: nếu không có NVIDIA, NVENC Init thất bại
+// và tự rơi xuống MF (MF lại tự chọn HW theo device, hoặc software).
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include "IVideoEncoder.h"
@@ -12,23 +12,23 @@
 #include <cstdio>
 
 std::unique_ptr<IVideoEncoder> CreateEncoder(ID3D11Device* device, const EncoderConfig& cfg) {
-    // 1. NVENC truoc.
+    // 1. NVENC trước.
     {
         auto enc = std::make_unique<NvencEncoder>();
         if (enc->Init(device, cfg)) {
-            std::printf("[Encoder] Dung backend: %ls\n", enc->BackendName());
+            std::printf("[Encoder] Using backend: %ls\n", enc->BackendName());
             return enc;
         }
-        std::printf("[Encoder] NVENC khong dung duoc, thu Media Foundation...\n");
+        std::printf("[Encoder] NVENC unavailable, trying Media Foundation...\n");
     }
     // 2. Media Foundation (fallback).
     {
         auto enc = std::make_unique<MfEncoder>();
         if (enc->Init(device, cfg)) {
-            std::printf("[Encoder] Dung backend: %ls\n", enc->BackendName());
+            std::printf("[Encoder] Using backend: %ls\n", enc->BackendName());
             return enc;
         }
     }
-    std::printf("[Encoder] Khong khoi tao duoc backend nao.\n");
+    std::printf("[Encoder] Failed to initialize any backend.\n");
     return nullptr;
 }

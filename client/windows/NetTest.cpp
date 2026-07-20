@@ -1,5 +1,5 @@
-// Self-test M1 (xem NetTest.h). Chi dung core (rgc) + C++ chuan - de sau nay
-// copy nguyen sang test rieng cua core/ khi core build standalone.
+// Self-test M1 (xem NetTest.h). Chỉ dùng core (rgc) + C++ chuẩn - để sau này
+// copy nguyên sang test riêng của core/ khi core build standalone.
 #include "NetTest.h"
 
 #include "rgc/Packetizer.h"
@@ -29,7 +29,7 @@ void Check(bool ok, const char* what) {
     }
 }
 
-// PRNG xac dinh (xorshift32) de moi lan chay cho cung ket qua.
+// PRNG xác định (xorshift32) để mỗi lần chạy cho cùng kết quả.
 uint32_t g_rng = 0x1234ABCD;
 uint32_t Rnd() {
     g_rng ^= g_rng << 13;
@@ -44,8 +44,8 @@ struct TestFrame {
     std::vector<uint8_t> nal;
 };
 
-// Tao chuoi frame gia: IDR moi `gop` frame, kich thuoc tron cac ca bien
-// (nho / dung 1 payload / 1 payload + 1 byte / nhieu manh).
+// Tạo chuỗi frame giả: IDR mỗi `gop` frame, kích thước trộn các ca biên
+// (nhỏ / đúng 1 payload / 1 payload + 1 byte / nhiều mảnh).
 std::vector<TestFrame> MakeFrames(size_t count, size_t gop) {
     std::vector<TestFrame> v;
     v.reserve(count);
@@ -78,9 +78,9 @@ std::vector<Datagram> Packetize(Packetizer& pk, const TestFrame& f, uint64_t tsU
 
 void Feed(Reassembler& ra, const Datagram& d, uint64_t nowUs) {
     const auto h = ParseCommonHeader(d);
-    if (!h) { Check(false, "ParseCommonHeader tren goi tu Packetizer"); return; }
+    if (!h) { Check(false, "ParseCommonHeader on packet from Packetizer"); return; }
     const auto v = ParseVideoPacket(*h, PayloadOf(d));
-    if (!v) { Check(false, "ParseVideoPacket tren goi tu Packetizer"); return; }
+    if (!v) { Check(false, "ParseVideoPacket on packet from Packetizer"); return; }
     ra.Push(*v, nowUs);
 }
 
@@ -96,27 +96,27 @@ void TestWireRoundtrip() {
 
     Hello h{0xDEADBEEF, kCodecMaskH264 | kCodecMaskHevc, 2560, 1440, 120, 0x0001};
     size_t n = BuildHello(buf, h);
-    Check(n == kCommonHeaderSize + 13, "kich thuoc HELLO");
+    Check(n == kCommonHeaderSize + 13, "HELLO size");
     auto ch = ParseCommonHeader(std::span<const uint8_t>(buf, n));
-    Check(ch && ch->type == MsgType::Hello && ch->sessionId == 0, "header HELLO");
+    Check(ch && ch->type == MsgType::Hello && ch->sessionId == 0, "HELLO header");
     auto hp = ParseHello(PayloadOf(std::span<const uint8_t>(buf, n)));
     Check(hp && hp->clientId == h.clientId && hp->codecMask == h.codecMask &&
           hp->maxWidth == h.maxWidth && hp->maxHeight == h.maxHeight &&
-          hp->desiredFps == h.desiredFps && hp->features == h.features, "payload HELLO");
+          hp->desiredFps == h.desiredFps && hp->features == h.features, "HELLO payload");
 
     HelloAck a{0xCAFE0001, Codec::H264, 1920, 1080, 60, 20'000'000, 123'456'789'012ull};
     n = BuildHelloAck(buf, a);
     auto ap = ParseHelloAck(PayloadOf(std::span<const uint8_t>(buf, n)));
     Check(ap && ap->sessionId == a.sessionId && ap->codec == a.codec &&
           ap->width == a.width && ap->height == a.height && ap->fps == a.fps &&
-          ap->bitrateBps == a.bitrateBps && ap->timebaseUs == a.timebaseUs, "payload HELLO_ACK");
+          ap->bitrateBps == a.bitrateBps && ap->timebaseUs == a.timebaseUs, "HELLO_ACK payload");
 
     PingPong p{7, 999'999'999'999ull};
     n = BuildPing(buf, 0xCAFE0001, p);
     ch = ParseCommonHeader(std::span<const uint8_t>(buf, n));
-    Check(ch && ch->type == MsgType::Ping && ch->sessionId == 0xCAFE0001, "header PING");
+    Check(ch && ch->type == MsgType::Ping && ch->sessionId == 0xCAFE0001, "PING header");
     auto pp = ParsePingPong(PayloadOf(std::span<const uint8_t>(buf, n)));
-    Check(pp && pp->pingId == p.pingId && pp->sendTimeUs == p.sendTimeUs, "payload PING");
+    Check(pp && pp->pingId == p.pingId && pp->sendTimeUs == p.sendTimeUs, "PING payload");
 
     n = BuildRequestKeyframe(buf, 0xCAFE0001);
     ch = ParseCommonHeader(std::span<const uint8_t>(buf, n));
@@ -124,7 +124,7 @@ void TestWireRoundtrip() {
 }
 
 void TestInOrder() {
-    std::printf("[nettest] giao dung thu tu...\n");
+    std::printf("[nettest] in-order delivery...\n");
     Packetizer pk;
     pk.SetSessionId(42);
     Reassembler ra(16'667);
@@ -135,17 +135,17 @@ void TestInOrder() {
         for (const auto& d : Packetize(pk, f, now)) Feed(ra, d, now);
         while (auto out = ra.PopReady(now)) {
             Check(popped < frames.size() && SameFrame(*out, frames[popped]),
-                  "frame ra == frame vao (in-order)");
+                  "output frame == input frame (in-order)");
             ++popped;
         }
         now += 16'667;
     }
-    Check(popped == frames.size(), "du 60 frame (in-order)");
-    Check(ra.stats().framesDropped == 0 && !ra.TakeLossEvent(), "khong loss (in-order)");
+    Check(popped == frames.size(), "got all 60 frames (in-order)");
+    Check(ra.stats().framesDropped == 0 && !ra.TakeLossEvent(), "no loss (in-order)");
 }
 
 void TestReorder() {
-    std::printf("[nettest] tron thu tu trong cua so 2 frame...\n");
+    std::printf("[nettest] shuffled order within a 2-frame window...\n");
     Packetizer pk;
     pk.SetSessionId(42);
     Reassembler ra(16'667);
@@ -153,7 +153,7 @@ void TestReorder() {
     uint64_t now = 1'000'000;
     size_t popped = 0;
     for (size_t i = 0; i < frames.size(); i += 2) {
-        // Gop goi cua 2 frame lien nhau roi xao tron ngau nhien.
+        // Gộp gói của 2 frame liền nhau rồi xáo trộn ngẫu nhiên.
         std::vector<Datagram> batch = Packetize(pk, frames[i], now);
         if (i + 1 < frames.size()) {
             auto more = Packetize(pk, frames[i + 1], now + 16'667);
@@ -164,21 +164,21 @@ void TestReorder() {
             std::swap(batch[k - 1], batch[Rnd() % k]);
         for (const auto& d : batch) Feed(ra, d, now);
         while (auto out = ra.PopReady(now)) {
-            Check(SameFrame(*out, frames[popped]), "frame ra dung thu tu (reorder)");
+            Check(SameFrame(*out, frames[popped]), "output frame in correct order (reorder)");
             ++popped;
         }
         now += 2 * 16'667;
     }
-    Check(popped == frames.size(), "du 40 frame (reorder)");
-    Check(ra.stats().framesDropped == 0 && !ra.TakeLossEvent(), "khong loss (reorder)");
+    Check(popped == frames.size(), "got all 40 frames (reorder)");
+    Check(ra.stats().framesDropped == 0 && !ra.TakeLossEvent(), "no loss (reorder)");
 }
 
 void TestDropPacket() {
-    std::printf("[nettest] mat 1 goi -> bo frame, loss event, nuot toi IDR...\n");
+    std::printf("[nettest] drop 1 packet -> drop frame, loss event, swallow until IDR...\n");
     Packetizer pk;
     pk.SetSessionId(42);
     Reassembler ra(16'667);
-    // Frame co dinh 5 manh, IDR moi 10 frame.
+    // Frame cố định 5 mảnh, IDR mỗi 10 frame.
     std::vector<TestFrame> frames;
     for (uint32_t i = 0; i < 20; ++i) {
         TestFrame f{i, (i % 10) == 0, {}};
@@ -191,24 +191,24 @@ void TestDropPacket() {
     bool sawLoss = false;
     for (const auto& f : frames) {
         auto pkts = Packetize(pk, f, now);
-        if (f.id == 5) pkts.erase(pkts.begin() + 2); // mat manh giua cua frame 5
+        if (f.id == 5) pkts.erase(pkts.begin() + 2); // mất mảnh giữa của frame 5
         for (const auto& d : pkts) Feed(ra, d, now);
         while (auto out = ra.PopReady(now)) got.push_back(out->frameId);
         sawLoss = sawLoss || ra.TakeLossEvent();
         now += 16'667;
     }
-    // Mong doi: 0..4 phat binh thuong, 5 bo, 6..9 bi nuot, 10..19 phat lai tu IDR.
+    // Mong đợi: 0..4 phát bình thường, 5 bỏ, 6..9 bị nuốt, 10..19 phát lại từ IDR.
     std::vector<uint32_t> want;
     for (uint32_t i = 0; i < 5; ++i) want.push_back(i);
     for (uint32_t i = 10; i < 20; ++i) want.push_back(i);
-    Check(got == want, "chuoi frame sau mat goi dung chinh sach");
-    Check(sawLoss, "co loss event sau khi bo frame");
-    Check(ra.stats().framesDropped == 1 && ra.stats().packetsLost == 1, "thong ke drop/lost");
-    Check(ra.stats().framesSkipped == 4, "4 frame non-IDR bi nuot");
+    Check(got == want, "frame sequence after packet loss matches policy");
+    Check(sawLoss, "loss event occurred after dropping frame");
+    Check(ra.stats().framesDropped == 1 && ra.stats().packetsLost == 1, "drop/lost stats");
+    Check(ra.stats().framesSkipped == 4, "4 non-IDR frames swallowed");
 }
 
 void TestDuplicates() {
-    std::printf("[nettest] goi trung lap...\n");
+    std::printf("[nettest] duplicate packets...\n");
     Packetizer pk;
     pk.SetSessionId(42);
     Reassembler ra(16'667);
@@ -218,45 +218,45 @@ void TestDuplicates() {
     for (const auto& f : frames) {
         const auto pkts = Packetize(pk, f, now);
         for (const auto& d : pkts) Feed(ra, d, now);
-        for (const auto& d : pkts) Feed(ra, d, now); // phat lai toan bo
+        for (const auto& d : pkts) Feed(ra, d, now); // phát lại toàn bộ
         while (auto out = ra.PopReady(now)) {
-            Check(SameFrame(*out, frames[popped]), "frame ra dung du goi trung");
+            Check(SameFrame(*out, frames[popped]), "output frame correct despite duplicate packets");
             ++popped;
         }
         now += 16'667;
     }
-    Check(popped == frames.size(), "du frame (duplicate)");
-    Check(ra.stats().framesDropped == 0, "khong drop (duplicate)");
+    Check(popped == frames.size(), "got all frames (duplicate)");
+    Check(ra.stats().framesDropped == 0, "no drop (duplicate)");
 }
 
 void TestJoinMidStream() {
-    std::printf("[nettest] join giua chung -> cho IDR dau tien...\n");
+    std::printf("[nettest] join mid-stream -> wait for first IDR...\n");
     Packetizer pk;
     pk.SetSessionId(42);
     Reassembler ra(16'667);
-    const auto frames = MakeFrames(16, 10); // IDR tai 0 va 10; ta bo qua frame 0
+    const auto frames = MakeFrames(16, 10); // IDR tại 0 và 10; ta bỏ qua frame 0
     uint64_t now = 1'000'000;
     std::vector<uint32_t> got;
     for (size_t i = 1; i < frames.size(); ++i) {
-        Check(ra.WaitingForIdr() == (got.empty()), "WaitingForIdr truoc IDR dau");
+        Check(ra.WaitingForIdr() == (got.empty()), "WaitingForIdr before first IDR");
         for (const auto& d : Packetize(pk, frames[i], now)) Feed(ra, d, now);
         while (auto out = ra.PopReady(now)) got.push_back(out->frameId);
         now += 16'667;
     }
     std::vector<uint32_t> want{10, 11, 12, 13, 14, 15};
-    Check(got == want, "chi phat tu IDR (join giua chung)");
-    Check(ra.stats().framesSkipped == 9, "9 frame truoc IDR bi nuot");
-    Check(!ra.TakeLossEvent(), "nuot khi cho IDR khong phai loss");
+    Check(got == want, "only emits from IDR (join mid-stream)");
+    Check(ra.stats().framesSkipped == 9, "9 frames before IDR swallowed");
+    Check(!ra.TakeLossEvent(), "swallowing while waiting for IDR is not loss");
 }
 
 void TestHeadTimeout() {
-    std::printf("[nettest] frame thieu manh qua 2 khoang frame -> bo theo timeout...\n");
+    std::printf("[nettest] frame missing a piece past 2 frame intervals -> drop on timeout...\n");
     Packetizer pk;
     pk.SetSessionId(42);
     Reassembler ra(16'667);
     std::vector<TestFrame> frames;
     for (uint32_t i = 0; i < 4; ++i) {
-        TestFrame f{i, i == 0 || i == 3, {}}; // IDR o 0 va 3
+        TestFrame f{i, i == 0 || i == 3, {}}; // IDR ở 0 và 3
         f.nal.resize(3 * kMaxVideoPayload);
         for (auto& b : f.nal) b = uint8_t(Rnd());
         frames.push_back(std::move(f));
@@ -264,24 +264,24 @@ void TestHeadTimeout() {
     uint64_t now = 1'000'000;
     for (const auto& d : Packetize(pk, frames[0], now)) Feed(ra, d, now);
     auto out = ra.PopReady(now);
-    Check(out && out->frameId == 0, "frame 0 phat binh thuong");
+    Check(out && out->frameId == 0, "frame 0 emitted normally");
 
     auto pkts1 = Packetize(pk, frames[1], now);
-    pkts1.pop_back(); // frame 1 thieu manh cuoi
+    pkts1.pop_back(); // frame 1 thiếu mảnh cuối
     for (const auto& d : pkts1) Feed(ra, d, now);
     for (const auto& d : Packetize(pk, frames[2], now)) Feed(ra, d, now);
-    Check(!ra.PopReady(now).has_value(), "chua bo khi con trong han");
+    Check(!ra.PopReady(now).has_value(), "not dropped yet while still within deadline");
 
     now += 40'000; // > 2 * 16667
-    Check(!ra.PopReady(now).has_value(), "frame 2 (non-IDR sau loss) khong duoc phat");
-    Check(ra.TakeLossEvent(), "loss event sau timeout");
+    Check(!ra.PopReady(now).has_value(), "frame 2 (non-IDR after loss) not emitted");
+    Check(ra.TakeLossEvent(), "loss event after timeout");
 
     for (const auto& d : Packetize(pk, frames[3], now)) Feed(ra, d, now);
     out = ra.PopReady(now);
-    Check(out && out->frameId == 3, "hoi phuc bang IDR sau loss");
+    Check(out && out->frameId == 3, "recovered via IDR after loss");
 }
 
-// ---- Mo phong 2 session noi bang "day" trong bo nho ----
+// ---- Mô phỏng 2 session nối bằng "dây" trong bộ nhớ ----
 
 struct WirePair {
     std::deque<Datagram> toHost, toClient;
@@ -311,7 +311,7 @@ void TestSessions() {
     ccb.onDisconnect = [&](const char* r) { cliDead = r; };
     ClientSession cli(ccb);
 
-    auto pump = [&] { // giao het goi dang cho o ca hai chieu (khong tre, khong mat)
+    auto pump = [&] { // giao hết gói đang chờ ở cả hai chiều (không trễ, không mất)
         for (int guard = 0; guard < 8; ++guard) {
             if (w.toHost.empty() && w.toClient.empty()) break;
             while (!w.toHost.empty()) {
@@ -327,39 +327,39 @@ void TestSessions() {
         }
     };
 
-    // HELLO dau tien bi "mat" -> retry sau 500ms phai toi noi.
+    // HELLO đầu tiên bị "mất" -> retry sau 500ms phải tới nơi.
     cli.Start(Hello{0x11223344, kCodecMaskH264, 2560, 1440, 60, 0}, now);
-    w.toHost.clear(); // gia lap mat goi HELLO
+    w.toHost.clear(); // giả lập mất gói HELLO
     now += 600'000;
-    cli.Tick(now); // phat lai HELLO
+    cli.Tick(now); // phát lại HELLO
     pump();
-    Check(cliReady, "onReady sau HELLO_ACK (qua retry)");
-    Check(np.width == 1920 && np.height == 1080 && np.fps == 60, "tham so dam phan");
-    Check(host.state() == HostSession::State::Streaming, "host STREAMING sau START");
-    Check(hostStarted, "onStart da goi (force IDR mo man)");
-    Check(cli.sessionId() == host.sessionId() && cli.sessionId() != 0, "sessionId khop");
+    Check(cliReady, "onReady after HELLO_ACK (via retry)");
+    Check(np.width == 1920 && np.height == 1080 && np.fps == 60, "negotiated parameters");
+    Check(host.state() == HostSession::State::Streaming, "host STREAMING after START");
+    Check(hostStarted, "onStart was called (force IDR to open)");
+    Check(cli.sessionId() == host.sessionId() && cli.sessionId() != 0, "sessionId matches");
 
-    // Goi video dau tien toi -> client sang STREAMING.
+    // Gói video đầu tiên tới -> client sang STREAMING.
     cli.NotifyVideoPacket(now);
-    Check(cli.state() == ClientSession::State::Streaming, "client STREAMING khi co video");
+    Check(cli.state() == ClientSession::State::Streaming, "client STREAMING when video present");
 
-    // PING/PONG do RTT.
+    // PING/PONG đo RTT.
     now += 1'100'000;
     cli.Tick(now);
     host.Tick(now);
     const uint64_t pingSent = now;
-    now += 30'000; // gia lap 30ms tren duong day
+    now += 30'000; // giả lập 30ms trên đường dây
     pump();
-    Check(cliRtt == uint32_t(now - pingSent), "RTT = tre khu hoi gia lap");
+    Check(cliRtt == uint32_t(now - pingSent), "RTT = simulated round-trip delay");
 
-    // Xin keyframe (co retry 250ms) -> host bao len encoder.
+    // Xin keyframe (có retry 250ms) -> host báo lên encoder.
     cli.RequestKeyframe();
     now += 260'000;
     cli.Tick(now);
     pump();
-    Check(hostKeyframeReq, "REQUEST_KEYFRAME toi host");
+    Check(hostKeyframeReq, "REQUEST_KEYFRAME reaches host");
 
-    // HELLO tu client khac trong khi dang ban -> tu choi.
+    // HELLO từ client khác trong khi đang bận -> từ chối.
     {
         WirePair w2;
         std::string otherDead;
@@ -369,8 +369,8 @@ void TestSessions() {
         c2.onDisconnect = [&](const char* r) { otherDead = r; };
         ClientSession other(c2);
         other.Start(Hello{0x55667788, kCodecMaskH264, 1280, 720, 30, 0}, now);
-        // Dua HELLO cua client 2 vao host; host dang send vao w.toClient —
-        // ACK tu choi vua sinh ra duoc chuyen ngay cho client 2.
+        // Đưa HELLO của client 2 vào host; host đang send vào w.toClient —
+        // ACK từ chối vừa sinh ra được chuyển ngay cho client 2.
         while (!w2.toHost.empty()) {
             auto d = std::move(w2.toHost.front());
             w2.toHost.pop_front();
@@ -381,33 +381,33 @@ void TestSessions() {
                 w.toClient.pop_back();
             }
         }
-        Check(!otherDead.empty(), "client thu hai bi tu choi khi host ban");
-        Check(host.state() == HostSession::State::Streaming, "phien cu khong bi anh huong");
+        Check(!otherDead.empty(), "second client refused while host is busy");
+        Check(host.state() == HostSession::State::Streaming, "existing session unaffected");
     }
 
-    // BYE -> host quay ve IDLE.
+    // BYE -> host quay về IDLE.
     cli.SendBye();
     pump();
     Check(hostDisconnected && host.state() == HostSession::State::Idle, "BYE -> host IDLE");
 
-    // Timeout: client 2 gui duoc HELLO (host sang READY) roi ca hai im lang.
-    // (pump() giao ACK cho `cli` cu nen cli2 khong bao gio nhan ACK — dung y:
-    // ta chi can hai phia tu thoat. Host timeout 5s; client bo cuoc HELLO 10s.)
+    // Timeout: client 2 gửi được HELLO (host sang READY) rồi cả hai im lặng.
+    // (pump() giao ACK cho `cli` cũ nên cli2 không bao giờ nhận ACK — dụng ý:
+    // ta chỉ cần hai phía tự thoát. Host timeout 5s; client bỏ cuộc HELLO 10s.)
     hostDisconnected = false;
     ClientSession cli2(ccb);
     cliDead.clear();
     cli2.Start(Hello{0x99AA0001, kCodecMaskH264, 1920, 1080, 60, 0}, now);
-    while (!w.toHost.empty()) { // chi giao chieu client->host
+    while (!w.toHost.empty()) { // chỉ giao chiều client->host
         host.HandlePacket(w.toHost.front(), now);
         w.toHost.pop_front();
     }
-    w.toClient.clear(); // ACK "mat" tren duong ve
-    Check(host.state() != HostSession::State::Idle, "phien thu hai thiet lap duoc");
+    w.toClient.clear(); // ACK "mất" trên đường về
+    Check(host.state() != HostSession::State::Idle, "second session established");
     now += 11'000'000;
     host.Tick(now);
     Check(hostDisconnected && host.state() == HostSession::State::Idle, "timeout -> host IDLE");
     cli2.Tick(now);
-    Check(!cliDead.empty(), "client bo cuoc khi host im lang");
+    Check(!cliDead.empty(), "client gives up when host goes silent");
 }
 
 // ---- GD4: input ----
@@ -421,7 +421,7 @@ InputEvent MakeKey(int32_t vk, int32_t scan, bool down) {
     return e;
 }
 
-// Wire: mot batch event di qua build/parse phai ve nguyen ven tung truong.
+// Wire: một batch event đi qua build/parse phải về nguyên vẹn từng trường.
 void TestInputWireRoundtrip() {
     std::printf("[M1] Wire input roundtrip...\n");
     std::vector<InputEvent> in;
@@ -439,30 +439,30 @@ void TestInputWireRoundtrip() {
 
     uint8_t buf[kMaxDatagram];
     const size_t n = BuildInputEvents(buf, 0xCAFEBABE, 77, in);
-    Check(n > 0, "BuildInputEvents thanh cong");
+    Check(n > 0, "BuildInputEvents succeeded");
     const auto h = ParseCommonHeader(std::span<const uint8_t>(buf, n));
-    Check(h && h->type == MsgType::InputEvent && h->chan == Chan::Input, "header input dung");
-    Check(h && h->sessionId == 0xCAFEBABE, "sessionId giu nguyen");
+    Check(h && h->type == MsgType::InputEvent && h->chan == Chan::Input, "input header correct");
+    Check(h && h->sessionId == 0xCAFEBABE, "sessionId preserved");
 
     InputEvent out[kMaxInputEvents];
     uint32_t firstSeq = 0;
     const size_t got = ParseInputEvents(PayloadOf(std::span<const uint8_t>(buf, n)),
                                         firstSeq, out);
-    Check(got == in.size() && firstSeq == 77, "so event + firstSeq dung");
+    Check(got == in.size() && firstSeq == 77, "event count + firstSeq correct");
     for (size_t i = 0; i < got && i < in.size(); ++i) {
         Check(out[i].type == in[i].type && out[i].a == in[i].a && out[i].b == in[i].b &&
               out[i].state == in[i].state && out[i].absolute == in[i].absolute &&
-              out[i].timestampUs == in[i].timestampUs, "event roundtrip nguyen ven");
+              out[i].timestampUs == in[i].timestampUs, "event roundtrip intact");
     }
-    // So am phai song sot (a = -1234) - loi kinh dien khi ep i32 qua u32.
-    Check(got >= 2 && out[1].a == -1234, "toa do am giu dung dau");
+    // Số âm phải sống sót (a = -1234) - lỗi kinh điển khi ép i32 qua u32.
+    Check(got >= 2 && out[1].a == -1234, "negative coordinate keeps correct sign");
 }
 
-// Duong ong day du: sender -> (mo phong mat goi) -> receiver.
-// Yeu cau then chot: KHONG event nao bi ap dung hai lan, va gui lap phai bu
-// duoc goi mat (neu khong -> ket phim).
+// Đường ống đầy đủ: sender -> (mô phỏng mất gói) -> receiver.
+// Yêu cầu then chốt: KHÔNG event nào bị áp dụng hai lần, và gửi lặp phải bù
+// được gói mất (nếu không -> kẹt phím).
 void TestInputSenderReceiver() {
-    std::printf("[M1] Input sender/receiver: khu trung + bu goi mat...\n");
+    std::printf("[M1] Input sender/receiver: dedupe + compensate for lost packets...\n");
     InputSender sender;
     sender.SetSessionId(1234);
     InputReceiver receiver;
@@ -470,7 +470,7 @@ void TestInputSenderReceiver() {
     std::vector<Datagram> wire;
     auto send = [&](std::span<const uint8_t> d) { wire.emplace_back(d.begin(), d.end()); };
 
-    // 20 lan nhan/nha phim, moi lan Flush ngay (giong go phim thuc te).
+    // 20 lần nhấn/nhả phím, mỗi lần Flush ngay (giống gõ phím thực tế).
     std::vector<InputEvent> sentEvents;
     uint64_t now = 0;
     for (int i = 0; i < 20; ++i) {
@@ -481,10 +481,10 @@ void TestInputSenderReceiver() {
         now += 10'000;
         sender.Flush(now, send);
     }
-    // Vai vong khong co event moi -> sender phat lai duoi.
+    // Vài vòng không có event mới -> sender phát lại đuôi.
     for (int i = 0; i < 4; ++i) { now += kInputRepeatIntervalUs; sender.Flush(now, send); }
 
-    // Bo 1/3 so datagram (mat goi nang hon thuc te nhieu).
+    // Bỏ 1/3 số datagram (mất gói nặng hơn thực tế nhiều).
     std::vector<InputEvent> applied;
     auto apply = [&](const InputEvent& e) { applied.push_back(e); };
     size_t dropped = 0;
@@ -492,21 +492,21 @@ void TestInputSenderReceiver() {
         if (i % 3 == 1) { ++dropped; continue; }
         receiver.HandlePacket(PayloadOf(wire[i]), apply);
     }
-    Check(dropped > 0, "co gia lap mat goi");
+    Check(dropped > 0, "packet loss was simulated");
     Check(applied.size() == sentEvents.size(),
-          "moi event den dung mot lan du mat 1/3 goi (khong ket phim, khong lap)");
+          "every event arrives exactly once despite losing 1/3 of packets (no stuck keys, no duplicates)");
     for (size_t i = 0; i < applied.size() && i < sentEvents.size(); ++i) {
         Check(applied[i].a == sentEvents[i].a && applied[i].state == sentEvents[i].state,
-              "event dung thu tu va noi dung");
+              "event correct order and content");
     }
-    Check(receiver.stats().duplicates > 0, "co ban lap bi khu (dung la co gui lap)");
-    Check(receiver.stats().lost == 0, "khong mat event nao");
+    Check(receiver.stats().duplicates > 0, "duplicates were deduped (confirms repeats were sent)");
+    Check(receiver.stats().lost == 0, "no events lost");
 }
 
-// Goi den dao thu tu khong duoc "tua nguoc" thao tac: gia su goi cu ve sau,
-// moi event trong do deu la seq cu -> phai bi bo het.
+// Gói đến đảo thứ tự không được "tua ngược" thao tác: giả sử gói cũ về sau,
+// mọi event trong đó đều là seq cũ -> phải bị bỏ hết.
 void TestInputReorder() {
-    std::printf("[M1] Input dao thu tu...\n");
+    std::printf("[M1] Input out-of-order...\n");
     InputSender sender;
     InputReceiver receiver;
     std::vector<Datagram> wire;
@@ -520,13 +520,13 @@ void TestInputReorder() {
     }
     std::vector<InputEvent> applied;
     auto apply = [&](const InputEvent& e) { applied.push_back(e); };
-    // Nhan goi cuoi TRUOC, roi moi den cac goi truoc do.
+    // Nhận gói cuối TRƯỚC, rồi mới đến các gói trước đó.
     receiver.HandlePacket(PayloadOf(wire.back()), apply);
     const size_t afterNewest = applied.size();
     for (size_t i = 0; i + 1 < wire.size(); ++i)
         receiver.HandlePacket(PayloadOf(wire[i]), apply);
-    Check(applied.size() == afterNewest, "goi den tre khong ap dung lai event cu");
-    Check(applied.back().a == 'A' + 5, "trang thai cuoi la event moi nhat");
+    Check(applied.size() == afterNewest, "late-arriving packet doesn't reapply old events");
+    Check(applied.back().a == 'A' + 5, "final state is the newest event");
 }
 
 } // namespace
@@ -546,9 +546,9 @@ int RunNetTest() {
     TestInputSenderReceiver();
     TestInputReorder();
     if (g_failures == 0) {
-        std::printf("=== NETTEST PASS: moi kiem tra dat ===\n");
+        std::printf("=== NETTEST PASS: all checks passed ===\n");
         return 0;
     }
-    std::printf("=== NETTEST FAIL: %d kiem tra truot ===\n", g_failures);
+    std::printf("=== NETTEST FAIL: %d checks failed ===\n", g_failures);
     return 1;
 }

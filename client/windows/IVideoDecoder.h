@@ -1,11 +1,11 @@
 #pragma once
 //
-// Interface decoder video - doi xung voi IVideoEncoder, tach khoi backend cu the.
+// Interface decoder video - đối xứng với IVideoEncoder, tách khỏi backend cụ thể.
 //
-// Giai doan 2 (loopback): nhan NAL Annex-B tu encoder trong CUNG process, giai ma
-// bang hardware (D3D11VA qua Media Foundation) ra texture NV12 trong VRAM, dua cho
-// Renderer ve len swapchain. Giai doan 3 se nhan NAL tu mang thay vi loopback -
-// interface nay khong doi.
+// Giai đoạn 2 (loopback): nhận NAL Annex-B từ encoder trong CÙNG process, giải mã
+// bằng hardware (D3D11VA qua Media Foundation) ra texture NV12 trong VRAM, đưa cho
+// Renderer vẽ lên swapchain. Giai đoạn 3 sẽ nhận NAL từ mạng thay vì loopback -
+// interface này không đổi.
 //
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -15,45 +15,45 @@
 #include <functional>
 #include <memory>
 
-#include "IVideoEncoder.h"  // dung lai enum Codec
+#include "IVideoEncoder.h"  // dùng lại enum Codec
 
 struct DecoderConfig {
     Codec    codec = Codec::H264;
-    uint32_t width = 0;   // kich thuoc goi y; decoder tu doc lai tu SPS khi stream doi
+    uint32_t width = 0;   // kích thước gợi ý; decoder tự đọc lại từ SPS khi stream đổi
     uint32_t height = 0;
     uint32_t fps = 60;
 };
 
-// Mot frame vua giai ma xong. `texture` la NV12 trong VRAM, thuong la mot phan tu
-// cua texture-array trong pool cua decoder -> phai dung kem `subresource`.
-// CHI hop le trong pham vi callback - render/copy ngay, khong giu lai.
+// Một frame vừa giải mã xong. `texture` là NV12 trong VRAM, thường là một phần tử
+// của texture-array trong pool của decoder -> phải dùng kèm `subresource`.
+// CHỈ hợp lệ trong phạm vi callback - render/copy ngay, không giữ lại.
 struct DecodedFrame {
-    ID3D11Texture2D* texture;      // NV12, con song trong VRAM khi callback chay
-    UINT             subresource;  // array slice trong pool cua decoder
+    ID3D11Texture2D* texture;      // NV12, còn sống trong VRAM khi callback chạy
+    UINT             subresource;  // array slice trong pool của decoder
     uint32_t         width;
     uint32_t         height;
-    uint64_t         timestampUs;  // timestamp truyen xuyen suot tu capture
+    uint64_t         timestampUs;  // timestamp truyền xuyên suốt từ capture
 };
 
 class IVideoDecoder {
 public:
-    // Callback moi khi giai ma xong mot frame. Chay tren luong goi Decode().
+    // Callback mỗi khi giải mã xong một frame. Chạy trên luồng gọi Decode().
     using FrameHandler = std::function<void(const DecodedFrame&)>;
 
     virtual ~IVideoDecoder() = default;
 
-    // Khoi tao tren device dung chung (cung device voi encoder o loopback;
-    // sang GD3 la device rieng cua client). false neu backend khong dung duoc.
+    // Khởi tạo trên device dùng chung (cùng device với encoder ở loopback;
+    // sang GD3 là device riêng của client). false nếu backend không dùng được.
     virtual bool Init(ID3D11Device* device, const DecoderConfig& cfg,
                       FrameHandler onFrame) = 0;
 
-    // Nap mot goi NAL Annex-B (1 frame nen). Frame giai ma xong tra ve qua onFrame
-    // (co the 0 hoac nhieu frame moi lan goi, tuy decoder giu tre bao nhieu).
+    // Nạp một gói NAL Annex-B (1 frame nén). Frame giải mã xong trả về qua onFrame
+    // (có thể 0 hoặc nhiều frame mỗi lần gọi, tùy decoder giữ trễ bao nhiêu).
     virtual bool Decode(const uint8_t* data, size_t size, uint64_t timestampUs) = 0;
 
     virtual const wchar_t* BackendName() const = 0;
 };
 
-// Factory: hien tai chi co backend Media Foundation (D3D11VA hardware decode).
+// Factory: hiện tại chỉ có backend Media Foundation (D3D11VA hardware decode).
 std::unique_ptr<IVideoDecoder> CreateDecoder(ID3D11Device* device, const DecoderConfig& cfg,
                                              IVideoDecoder::FrameHandler onFrame);

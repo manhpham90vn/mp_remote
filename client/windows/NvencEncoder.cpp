@@ -12,7 +12,7 @@
 #include <map>
 #include <string>
 
-// Nap DLL dong: khong link .lib, chi can DLL di kem driver.
+// Nạp DLL động: không link .lib, chỉ cần DLL đi kèm driver.
 using PFN_CreateInstance = NVENCSTATUS(NVENCAPI*)(NV_ENCODE_API_FUNCTION_LIST*);
 using PFN_MaxVersion = NVENCSTATUS(NVENCAPI*)(uint32_t*);
 
@@ -20,21 +20,21 @@ struct NvencEncoder::Impl {
     HMODULE                    dll = nullptr;
     NV_ENCODE_API_FUNCTION_LIST nv{};
     void*                      enc = nullptr;         // encode session handle
-    NV_ENC_OUTPUT_PTR          bitstream = nullptr;   // 1 buffer (dong bo, khong B-frame)
+    NV_ENC_OUTPUT_PTR          bitstream = nullptr;   // 1 buffer (đồng bộ, không B-frame)
     FILE*                      out = nullptr;
     EncoderConfig              cfg{};
     uint32_t                   width = 0, height = 0;
     uint64_t                   frameCount = 0;
     uint64_t                   totalBytes = 0;
 
-    // Cache dang ky theo con tro texture: WGC dung lai vai texture (pool depth 2).
+    // Cache đăng ký theo con trỏ texture: WGC dùng lại vài texture (pool depth 2).
     std::map<ID3D11Texture2D*, NV_ENC_REGISTERED_PTR> registered;
 
     ~Impl() { Cleanup(); }
 
     bool Fail(const char* where, NVENCSTATUS s) {
         const char* msg = (nv.nvEncGetLastErrorString && enc) ? nv.nvEncGetLastErrorString(enc) : "";
-        std::printf("[NVENC] %s that bai: status=%d %s\n", where, (int)s, msg ? msg : "");
+        std::printf("[NVENC] %s failed: status=%d %s\n", where, (int)s, msg ? msg : "");
         return false;
     }
 
@@ -44,16 +44,16 @@ struct NvencEncoder::Impl {
         height = c.height;
 
         dll = LoadLibraryW(L"nvEncodeAPI64.dll");
-        if (!dll) { std::printf("[NVENC] Khong nap duoc nvEncodeAPI64.dll (driver NVIDIA?).\n"); return false; }
+        if (!dll) { std::printf("[NVENC] Failed to load nvEncodeAPI64.dll (NVIDIA driver missing?).\n"); return false; }
 
-        // Kiem tra driver du moi so voi header.
+        // Kiểm tra driver đủ mới so với header.
         auto getMax = (PFN_MaxVersion)GetProcAddress(dll, "NvEncodeAPIGetMaxSupportedVersion");
         if (getMax) {
             uint32_t driverMax = 0;
             if (getMax(&driverMax) == NV_ENC_SUCCESS) {
                 uint32_t needed = (NVENCAPI_MAJOR_VERSION << 4) | NVENCAPI_MINOR_VERSION;
                 if (driverMax < needed) {
-                    std::printf("[NVENC] Driver cu hon header (driver=%u.%u < can=%u.%u).\n",
+                    std::printf("[NVENC] Driver older than header (driver=%u.%u < required=%u.%u).\n",
                         driverMax >> 4, driverMax & 0xf,
                         NVENCAPI_MAJOR_VERSION, NVENCAPI_MINOR_VERSION);
                     return false;
@@ -62,14 +62,14 @@ struct NvencEncoder::Impl {
         }
 
         auto createInstance = (PFN_CreateInstance)GetProcAddress(dll, "NvEncodeAPICreateInstance");
-        if (!createInstance) { std::printf("[NVENC] Thieu NvEncodeAPICreateInstance.\n"); return false; }
+        if (!createInstance) { std::printf("[NVENC] Missing NvEncodeAPICreateInstance.\n"); return false; }
 
         nv = {};
         nv.version = NV_ENCODE_API_FUNCTION_LIST_VER;
         NVENCSTATUS s = createInstance(&nv);
         if (s != NV_ENC_SUCCESS) { std::printf("[NVENC] CreateInstance status=%d\n", (int)s); return false; }
 
-        // Mo session tren chinh D3D11 device dung chung voi capture.
+        // Mở session trên chính D3D11 device dùng chung với capture.
         NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS sp{};
         sp.version = NV_ENC_OPEN_ENCODE_SESSION_EX_PARAMS_VER;
         sp.deviceType = NV_ENC_DEVICE_TYPE_DIRECTX;
@@ -83,7 +83,7 @@ struct NvencEncoder::Impl {
         const GUID presetGuid = NV_ENC_PRESET_P4_GUID;
         const NV_ENC_TUNING_INFO tuning = NV_ENC_TUNING_INFO_ULTRA_LOW_LATENCY;
 
-        // Lay cau hinh preset roi tinh chinh cho low-latency.
+        // Lấy cấu hình preset rồi tinh chỉnh cho low-latency.
         NV_ENC_PRESET_CONFIG preset{};
         preset.version = NV_ENC_PRESET_CONFIG_VER;
         preset.presetCfg.version = NV_ENC_CONFIG_VER;
@@ -91,8 +91,8 @@ struct NvencEncoder::Impl {
         if (s != NV_ENC_SUCCESS) return Fail("GetEncodePresetConfigEx", s);
 
         NV_ENC_CONFIG encCfg = preset.presetCfg;
-        encCfg.gopLength = NVENC_INFINITE_GOPLENGTH;   // IDR theo yeu cau, khong dinh ky
-        encCfg.frameIntervalP = 1;                     // khong B-frame (do tre thap)
+        encCfg.gopLength = NVENC_INFINITE_GOPLENGTH;   // IDR theo yêu cầu, không định kỳ
+        encCfg.frameIntervalP = 1;                     // không B-frame (độ trễ thấp)
         encCfg.rcParams.rateControlMode = NV_ENC_PARAMS_RC_CBR;
         encCfg.rcParams.averageBitRate = cfg.bitrateBps;
         encCfg.rcParams.vbvBufferSize = cfg.bitrateBps / (cfg.fps ? cfg.fps : 60); // ~1 frame
@@ -116,32 +116,32 @@ struct NvencEncoder::Impl {
         ip.darHeight = height;
         ip.frameRateNum = cfg.fps ? cfg.fps : 60;
         ip.frameRateDen = 1;
-        ip.enablePTD = 1;                 // NVENC tu quyet dinh loai picture
-        ip.enableEncodeAsync = 0;         // dong bo cho don gian
+        ip.enablePTD = 1;                 // NVENC tự quyết định loại picture
+        ip.enableEncodeAsync = 0;         // đồng bộ cho đơn giản
         ip.encodeConfig = &encCfg;
         s = nv.nvEncInitializeEncoder(enc, &ip);
         if (s != NV_ENC_SUCCESS) return Fail("InitializeEncoder", s);
 
-        // Buffer bitstream dau ra.
+        // Buffer bitstream đầu ra.
         NV_ENC_CREATE_BITSTREAM_BUFFER cb{};
         cb.version = NV_ENC_CREATE_BITSTREAM_BUFFER_VER;
         s = nv.nvEncCreateBitstreamBuffer(enc, &cb);
         if (s != NV_ENC_SUCCESS) return Fail("CreateBitstreamBuffer", s);
         bitstream = cb.bitstreamBuffer;
 
-        // NVENC xuat Annex-B tho. File .h264 la tuy chon (rong = chi di qua onPacket).
+        // NVENC xuất Annex-B thô. File .h264 là tùy chọn (rỗng = chỉ đi qua onPacket).
         std::wstring path = cfg.outputPath;
         if (!path.empty()) {
             size_t dot = path.find_last_of(L'.');
             if (dot != std::wstring::npos && path.substr(dot) == L".mp4") path = path.substr(0, dot) + L".h264";
             out = _wfopen(path.c_str(), L"wb");
-            if (!out) { std::printf("[NVENC] Khong mo duoc file xuat.\n"); return false; }
+            if (!out) { std::printf("[NVENC] Failed to open output file.\n"); return false; }
         } else if (!cfg.onPacket) {
-            std::printf("[NVENC] Khong co outputPath lan onPacket - khong co dau ra.\n");
+            std::printf("[NVENC] No outputPath or onPacket - no output destination.\n");
             return false;
         }
 
-        std::printf("[NVENC] Khoi tao xong: %ux%u @%ufps, %.1f Mbps, %s, ULTRA_LOW_LATENCY -> %ls\n",
+        std::printf("[NVENC] Initialized: %ux%u @%ufps, %.1f Mbps, %s, ULTRA_LOW_LATENCY -> %ls\n",
             width, height, cfg.fps, cfg.bitrateBps / 1e6,
             cfg.codec == Codec::HEVC ? "HEVC" : "H264",
             path.empty() ? L"callback" : path.c_str());
@@ -159,7 +159,7 @@ struct NvencEncoder::Impl {
         rr.height = height;
         rr.pitch = 0;
         rr.resourceToRegister = tex;
-        rr.bufferFormat = NV_ENC_BUFFER_FORMAT_ARGB;  // B8G8R8A8 tu WGC
+        rr.bufferFormat = NV_ENC_BUFFER_FORMAT_ARGB;  // B8G8R8A8 từ WGC
         NVENCSTATUS s = nv.nvEncRegisterResource(enc, &rr);
         if (s != NV_ENC_SUCCESS) { Fail("RegisterResource", s); return nullptr; }
         registered[tex] = rr.registeredResource;
@@ -227,13 +227,13 @@ struct NvencEncoder::Impl {
 
     void Finish() {
         if (!enc) return;
-        // Gui EOS de flush not.
+        // Gửi EOS để flush nốt.
         NV_ENC_PIC_PARAMS eos{};
         eos.version = NV_ENC_PIC_PARAMS_VER;
         eos.encodePicFlags = NV_ENC_PIC_FLAG_EOS;
         if (nv.nvEncEncodePicture(enc, &eos) == NV_ENC_SUCCESS) WriteOutput();
         if (out) std::fflush(out);
-        std::printf("[NVENC] Da nen %llu frame, %.2f MB.\n",
+        std::printf("[NVENC] Encoded %llu frame, %.2f MB.\n",
             (unsigned long long)frameCount, totalBytes / 1e6);
     }
 

@@ -20,34 +20,34 @@
 
 using Microsoft::WRL::ComPtr;
 
-// In loi HRESULT roi return false/void.
+// In lỗi HRESULT rồi return false/void.
 #define MF_CHECK(expr, msg)                                                       \
     do {                                                                          \
         HRESULT _hr = (expr);                                                     \
         if (FAILED(_hr)) {                                                        \
-            std::printf("[MfEncoder] %s that bai: 0x%08lX\n", (msg),              \
+            std::printf("[MfEncoder] %s failed: 0x%08lX\n", (msg),                \
                         (unsigned long)_hr);                                      \
             return false;                                                         \
         }                                                                         \
     } while (0)
 
-// Bien the tra -1 (dung trong ham tra int).
+// Biến thể trả -1 (dùng trong hàm trả int).
 #define MF_CHECKI(expr, msg)                                                      \
     do {                                                                          \
         HRESULT _hr = (expr);                                                     \
         if (FAILED(_hr)) {                                                        \
-            std::printf("[MfEncoder] %s that bai: 0x%08lX\n", (msg),              \
+            std::printf("[MfEncoder] %s failed: 0x%08lX\n", (msg),                \
                         (unsigned long)_hr);                                      \
             return -1;                                                            \
         }                                                                         \
     } while (0)
 
 struct MfEncoder::Impl {
-    ComPtr<IMFActivate>           activate;     // giu lai de tao-lai transform khi can (xin keyframe)
+    ComPtr<IMFActivate>           activate;     // giữ lại để tạo-lại transform khi cần (xin keyframe)
     ComPtr<IMFTransform>          mft;
-    ComPtr<IMFMediaEventGenerator> events;      // chi dung khi isAsync
+    ComPtr<IMFMediaEventGenerator> events;      // chỉ dùng khi isAsync
     ComPtr<IMFDXGIDeviceManager>  deviceManager;
-    ComPtr<ICodecAPI>             codecApi;     // rate control / force keyframe (khong bat buoc)
+    ComPtr<ICodecAPI>             codecApi;     // rate control / force keyframe (không bắt buộc)
 
     ComPtr<ID3D11Device>          device;
     ComPtr<ID3D11DeviceContext>   context;
@@ -55,9 +55,9 @@ struct MfEncoder::Impl {
     ComPtr<ID3D11VideoContext>    videoContext;
     ComPtr<ID3D11VideoProcessorEnumerator> vpEnum;
     ComPtr<ID3D11VideoProcessor>  vp;
-    ComPtr<ID3D11Texture2D>       nv12Tex;       // scratch: BGRA (WGC) -> NV12 (dau vao encoder)
+    ComPtr<ID3D11Texture2D>       nv12Tex;       // scratch: BGRA (WGC) -> NV12 (đầu vào encoder)
     ComPtr<ID3D11VideoProcessorOutputView> vpOutView;
-    // Cache input view theo texture nguon: WGC dung lai vai texture (pool depth 2).
+    // Cache input view theo texture nguồn: WGC dùng lại vài texture (pool depth 2).
     std::map<ID3D11Texture2D*, ComPtr<ID3D11VideoProcessorInputView>> vpInViews;
 
     EncoderConfig cfg{};
@@ -71,7 +71,7 @@ struct MfEncoder::Impl {
     uint64_t frameCount = 0;
     uint64_t totalBytes = 0;
     FILE*    out = nullptr;
-    std::vector<uint8_t> spsPps;  // extradata Annex-B (SPS+PPS), chen truoc moi IDR
+    std::vector<uint8_t> spsPps;  // extradata Annex-B (SPS+PPS), chèn trước mỗi IDR
 
     ~Impl() {
         if (mft && streaming) {
@@ -91,8 +91,8 @@ struct MfEncoder::Impl {
         return (c == Codec::HEVC) ? MFVideoFormat_HEVC : MFVideoFormat_H264;
     }
 
-    // Tim + chon IMFActivate D3D11-aware phu hop (chi lam 1 lan, giu lai trong `activate`
-    // de tao-lai transform re khi can xin keyframe - xem ReinitTransform()).
+    // Tìm + chọn IMFActivate D3D11-aware phù hợp (chỉ làm 1 lần, giữ lại trong `activate`
+    // để tạo-lại transform rẻ khi cần xin keyframe - xem ReinitTransform()).
     bool FindActivate() {
         MFT_REGISTER_TYPE_INFO outInfo{ MFMediaType_Video, SubtypeFor(cfg.codec) };
         IMFActivate** activates = nullptr;
@@ -102,11 +102,11 @@ struct MfEncoder::Impl {
                            nullptr, &outInfo, &activates, &count),
                  "MFTEnumEx");
         if (count == 0) {
-            std::printf("[MfEncoder] Khong tim thay encoder MFT nao.\n");
+            std::printf("[MfEncoder] No encoder MFT found.\n");
             return false;
         }
-        // MF_SA_D3D11_AWARE khong dang tin cay tren attribute cua IMFActivate (truoc khi
-        // activate) voi vai driver - phai activate roi doc thuoc tinh tren chinh transform.
+        // MF_SA_D3D11_AWARE không đáng tin cậy trên attribute của IMFActivate (trước khi
+        // activate) với vài driver - phải activate rồi đọc thuộc tính trên chính transform.
         for (UINT32 i = 0; i < count && !activate; ++i) {
             wchar_t name[256] = L"?";
             UINT32 nameLen = 0;
@@ -116,12 +116,12 @@ struct MfEncoder::Impl {
             ComPtr<IMFAttributes> candidateAttrs;
             if (FAILED(activates[i]->ActivateObject(IID_PPV_ARGS(&candidate))) ||
                 FAILED(candidate->GetAttributes(&candidateAttrs))) {
-                std::wprintf(L"[MfEncoder] Tim thay MFT: %ls (activate that bai)\n", name);
+                std::wprintf(L"[MfEncoder] Found MFT: %ls (activate failed)\n", name);
                 continue;
             }
             UINT32 aware = 0;
             candidateAttrs->GetUINT32(MF_SA_D3D11_AWARE, &aware);
-            std::wprintf(L"[MfEncoder] Tim thay MFT: %ls (D3D11-aware=%u)\n", name, aware);
+            std::wprintf(L"[MfEncoder] Found MFT: %ls (D3D11-aware=%u)\n", name, aware);
             if (!aware) { activates[i]->ShutdownObject(); continue; }
             activate = activates[i];
             mft = candidate;
@@ -129,19 +129,19 @@ struct MfEncoder::Impl {
         for (UINT32 i = 0; i < count; ++i) activates[i]->Release();
         CoTaskMemFree(activates);
         if (!activate) {
-            std::printf("[MfEncoder] Khong co encoder MFT nao D3D11-aware.\n");
+            std::printf("[MfEncoder] No D3D11-aware encoder MFT available.\n");
             return false;
         }
         return true;
     }
 
-    // Cau hinh transform hien co trong `mft` (kieu dau vao/ra, rate control, D3D manager,
-    // BEGIN_STREAMING). Dung chung cho Init() lan dau va ReinitTransform() (xin keyframe).
+    // Cấu hình transform hiện có trong `mft` (kiểu đầu vào/ra, rate control, D3D manager,
+    // BEGIN_STREAMING). Dùng chung cho Init() lần đầu và ReinitTransform() (xin keyframe).
     bool ConfigureTransform() {
         ComPtr<IMFAttributes> mftAttrs;
         MF_CHECK(mft->GetAttributes(&mftAttrs), "GetAttributes");
 
-        // MFT phan cung thuong la async - phai mo khoa TRUOC khi goi method nao khac.
+        // MFT phần cứng thường là async - phải mở khóa TRƯỚC khi gọi method nào khác.
         UINT32 asyncFlag = 0;
         mftAttrs->GetUINT32(MF_TRANSFORM_ASYNC, &asyncFlag);
         isAsync = asyncFlag != 0;
@@ -153,7 +153,7 @@ struct MfEncoder::Impl {
         MF_CHECK(mft->ProcessMessage(MFT_MESSAGE_SET_D3D_MANAGER, (ULONG_PTR)deviceManager.Get()),
                  "SET_D3D_MANAGER");
 
-        // --- Kieu dau ra: H.264/HEVC nen (dat truoc input - encoder can biet dich) ---
+        // --- Kiểu đầu ra: H.264/HEVC nén (đặt trước input - encoder cần biết đích) ---
         ComPtr<IMFMediaType> outType;
         MF_CHECK(MFCreateMediaType(&outType), "MFCreateMediaType(out)");
         outType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -171,7 +171,7 @@ struct MfEncoder::Impl {
                  "PAR(out)");
         MF_CHECK(mft->SetOutputType(0, outType.Get(), 0), "SetOutputType");
 
-        // --- Kieu dau vao: NV12 (encoder phan cung khong nhan BGRA thang - tu chuyen mau) ---
+        // --- Kiểu đầu vào: NV12 (encoder phần cứng không nhận BGRA thẳng - tự chuyển màu) ---
         ComPtr<IMFMediaType> inType;
         MF_CHECK(MFCreateMediaType(&inType), "MFCreateMediaType(in)");
         inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -198,10 +198,10 @@ struct MfEncoder::Impl {
         return true;
     }
 
-    // Tao lai transform tu dau (cung 1 IMFActivate) de xin IDR: vai driver (Intel QSV o
-    // day) khong ho tro force-keyframe qua ICodecAPI lan cac thu thuat FLUSH/SetOutputType
-    // giua chung (da thu, khong an hoac lam hong transform) - nhung transform MOI luon
-    // phat IDR o sample dau tien, nen day la duong chac chan duy nhat con lai.
+    // Tạo lại transform từ đầu (cùng 1 IMFActivate) để xin IDR: vài driver (Intel QSV ở
+    // đây) không hỗ trợ force-keyframe qua ICodecAPI lẫn các thủ thuật FLUSH/SetOutputType
+    // giữa chừng (đã thử, không ăn hoặc làm hỏng transform) - nhưng transform MỚI luôn
+    // phát IDR ở sample đầu tiên, nên đây là đường chắc chắn duy nhất còn lại.
     bool ReinitTransform() {
         if (mft && streaming) {
             mft->ProcessMessage(MFT_MESSAGE_NOTIFY_END_OF_STREAM, 0);
@@ -214,10 +214,10 @@ struct MfEncoder::Impl {
         if (!activate) return false;
         activate->ShutdownObject();
         if (FAILED(activate->ActivateObject(IID_PPV_ARGS(&mft)))) {
-            std::printf("[MfEncoder] Tao lai encoder de xin keyframe that bai.\n");
+            std::printf("[MfEncoder] Failed to recreate encoder for keyframe request.\n");
             return false;
         }
-        spsPps.clear();  // transform moi - lay lai extradata rieng cua no
+        spsPps.clear();  // transform mới - lấy lại extradata riêng của nó
         return ConfigureTransform();
     }
 
@@ -226,7 +226,7 @@ struct MfEncoder::Impl {
         device = dev;
         device->GetImmediateContext(&context);
 
-        // MFT + video processor cham vao immediate context tu nhieu luong -> bat khoa.
+        // MFT + video processor chạm vào immediate context từ nhiều luồng -> bật khóa.
         ComPtr<ID3D10Multithread> mt;
         if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&mt)))) {
             mt->SetMultithreadProtected(TRUE);
@@ -244,20 +244,20 @@ struct MfEncoder::Impl {
         if (!ConfigureTransform()) return false;
         if (!SetupColorConvert()) return false;
 
-        // File debug tuy chon: NAL Annex-B tho (giong NVENC), khong con la .mp4 container.
+        // File debug tùy chọn: NAL Annex-B thô (giống NVENC), không còn là .mp4 container.
         if (!cfg.outputPath.empty()) {
             std::wstring path = cfg.outputPath;
             size_t dot = path.find_last_of(L'.');
             if (dot != std::wstring::npos && path.substr(dot) == L".mp4")
                 path = path.substr(0, dot) + L".h264";
             out = _wfopen(path.c_str(), L"wb");
-            if (!out) { std::printf("[MfEncoder] Khong mo duoc file xuat.\n"); return false; }
+            if (!out) { std::printf("[MfEncoder] Failed to open output file.\n"); return false; }
         } else if (!cfg.onPacket) {
-            std::printf("[MfEncoder] Khong co outputPath lan onPacket - khong co dau ra.\n");
+            std::printf("[MfEncoder] No outputPath or onPacket - no output destination.\n");
             return false;
         }
 
-        std::printf("[MfEncoder] Khoi tao xong: %ux%u @%ufps, %.1f Mbps, %s%s -> %s\n",
+        std::printf("[MfEncoder] Initialized: %ux%u @%ufps, %.1f Mbps, %s%s -> %s\n",
                     cfg.width, cfg.height, cfg.fps, cfg.bitrateBps / 1e6,
                     cfg.codec == Codec::HEVC ? "HEVC" : "H264",
                     isAsync ? " (async MFT)" : " (sync MFT)",
@@ -265,11 +265,11 @@ struct MfEncoder::Impl {
         return true;
     }
 
-    // Rate control / low-latency / force-keyframe qua ICodecAPI. Khong bat buoc: neu MFT
-    // khong ho tro ICodecAPI hoac mot thuoc tinh nao do, bo qua (khong that bai Init).
+    // Rate control / low-latency / force-keyframe qua ICodecAPI. Không bắt buộc: nếu MFT
+    // không hỗ trợ ICodecAPI hoặc một thuộc tính nào đó, bỏ qua (không làm Init thất bại).
     bool SetupRateControl() {
         if (FAILED(mft.As(&codecApi))) {
-            std::printf("[MfEncoder] Khong lay duoc ICodecAPI - dung tham so mac dinh cua MFT.\n");
+            std::printf("[MfEncoder] Failed to get ICodecAPI - using MFT default parameters.\n");
             return true;
         }
         auto setUI4 = [&](const GUID& api, ULONG val) {
@@ -286,23 +286,23 @@ struct MfEncoder::Impl {
         setUI4(CODECAPI_AVEncCommonMeanBitRate, (ULONG)cfg.bitrateBps);
         setBool(CODECAPI_AVEncCommonLowLatency, true);
         setBool(CODECAPI_AVLowLatencyMode, true);
-        setUI4(CODECAPI_AVEncMPVGOPSize, 0x7fffffff);  // ~vo han, IDR theo yeu cau
+        setUI4(CODECAPI_AVEncMPVGOPSize, 0x7fffffff);  // ~vô hạn, IDR theo yêu cầu
         return true;
     }
 
-    // Xin IDR. true = san sang nhan frame ke tiep (co the vua tao lai transform).
-    // false = hong hoan toan.
+    // Xin IDR. true = sẵn sàng nhận frame kế tiếp (có thể vừa tạo lại transform).
+    // false = hỏng hoàn toàn.
     bool RequestKeyFrame() {
         if (codecApi && codecApi->IsSupported(&CODECAPI_AVEncVideoForceKeyFrame)) {
             VARIANT v{}; v.vt = VT_UI4; v.ulVal = 1;
             if (SUCCEEDED(codecApi->SetValue(&CODECAPI_AVEncVideoForceKeyFrame, &v))) return true;
         }
-        // Driver nay khong ho tro force qua ICodecAPI (da xac nhan qua kiem thu that voi
-        // Intel QSV) - tao lai transform tu dau, transform moi luon phat IDR o frame dau.
+        // Driver này không hỗ trợ force qua ICodecAPI (đã xác nhận qua kiểm thử thật với
+        // Intel QSV) - tạo lại transform từ đầu, transform mới luôn phát IDR ở frame đầu.
         return ReinitTransform();
     }
 
-    // D3D11 Video Processor de chuyen BGRA (tu WGC) -> NV12 (dinh dang encoder can).
+    // D3D11 Video Processor để chuyển BGRA (từ WGC) -> NV12 (định dạng encoder cần).
     bool SetupColorConvert() {
         MF_CHECK(device.As(&videoDevice), "ID3D11VideoDevice");
         MF_CHECK(context.As(&videoContext), "ID3D11VideoContext");
@@ -320,7 +320,7 @@ struct MfEncoder::Impl {
         UINT fmtFlags = 0;
         HRESULT hr = vpEnum->CheckVideoProcessorFormat(DXGI_FORMAT_NV12, &fmtFlags);
         if (FAILED(hr) || !(fmtFlags & D3D11_VIDEO_PROCESSOR_FORMAT_SUPPORT_OUTPUT)) {
-            std::printf("[MfEncoder] GPU khong xuat duoc NV12 tu video processor.\n");
+            std::printf("[MfEncoder] GPU cannot output NV12 from video processor.\n");
             return false;
         }
 
@@ -370,8 +370,8 @@ struct MfEncoder::Impl {
         return true;
     }
 
-    // Rut extradata SPS/PPS (Annex-B) tu kieu dau ra da thuong luong. Goi lan dau khi
-    // gap IDR - vai encoder chi dien day du blob nay sau khi da bat dau nen.
+    // Rút extradata SPS/PPS (Annex-B) từ kiểu đầu ra đã thương lượng. Gọi lần đầu khi
+    // gặp IDR - vài encoder chỉ điền đầy đủ blob này sau khi đã bắt đầu nén.
     void CacheSpsPps() {
         ComPtr<IMFMediaType> curOut;
         if (FAILED(mft->GetOutputCurrentType(0, &curOut))) return;
@@ -382,9 +382,9 @@ struct MfEncoder::Impl {
             spsPps.clear();
     }
 
-    // Quet NAL Annex-B tim nal_unit_type==5 (IDR slice). Dung thay cho
-    // MFSampleExtension_CleanPoint: attribute nay khong dang tin cay tren moi driver
-    // (vd Intel QSV chi dat dung cho sample dau tien, cac IDR sau bo trong).
+    // Quét NAL Annex-B tìm nal_unit_type==5 (IDR slice). Dùng thay cho
+    // MFSampleExtension_CleanPoint: attribute này không đáng tin cậy trên mọi driver
+    // (vd Intel QSV chỉ đặt đúng cho sample đầu tiên, các IDR sau bỏ trống).
     static bool ContainsIdrNal(const uint8_t* data, size_t len) {
         for (size_t i = 0; i + 3 < len; ++i) {
             if (data[i] != 0 || data[i + 1] != 0) continue;
@@ -398,7 +398,7 @@ struct MfEncoder::Impl {
         return false;
     }
 
-    // Rut NAL tu 1 sample dau ra, chen SPS/PPS truoc IDR, day vao file/callback.
+    // Rút NAL từ 1 sample đầu ra, chèn SPS/PPS trước IDR, đẩy vào file/callback.
     bool EmitSample(IMFSample* sample) {
         ComPtr<IMFMediaBuffer> buffer;
         MF_CHECK(sample->ConvertToContiguousBuffer(&buffer), "ConvertToContiguousBuffer");
@@ -439,15 +439,15 @@ struct MfEncoder::Impl {
         return true;
     }
 
-    // MFT doi kieu dau ra (vd can padding macroblock 16px cho kich thuoc le) - lay lai
-    // kieu no de nghi va chap nhan (giu nguyen, khong tu sua FRAME_SIZE/bitrate).
+    // MFT đổi kiểu đầu ra (vd cần padding macroblock 16px cho kích thước lẻ) - lấy lại
+    // kiểu nó đề nghị và chấp nhận (giữ nguyên, không tự sửa FRAME_SIZE/bitrate).
     bool RenegotiateOutputType() {
         for (DWORD i = 0;; ++i) {
             ComPtr<IMFMediaType> t;
             HRESULT hr = mft->GetOutputAvailableType(0, i, &t);
             if (hr == MF_E_NO_MORE_TYPES) break;
             if (FAILED(hr)) {
-                std::printf("[MfEncoder] GetOutputAvailableType that bai: 0x%08lX\n",
+                std::printf("[MfEncoder] GetOutputAvailableType failed: 0x%08lX\n",
                             (unsigned long)hr);
                 return false;
             }
@@ -463,14 +463,14 @@ struct MfEncoder::Impl {
                 return true;
             }
         }
-        std::printf("[MfEncoder] Khong tim duoc kieu dau ra phu hop sau STREAM_CHANGE.\n");
+        std::printf("[MfEncoder] Could not find a suitable output type after STREAM_CHANGE.\n");
         return false;
     }
 
-    // Rut 1 sample dau ra neu co. 1 = da phat (EmitSample), 0 = chua co gi, -1 = loi.
-    // MFT dong bo: STREAM_CHANGE cho phep goi lai ProcessOutput ngay (cung 1 lan goi).
-    // MFT bat dong bo: KHONG duoc goi Process* ngoai su kien - renegotiate roi return 0,
-    // cho su kien HaveOutput moi (MFT tu phat lai sau khi kieu da duoc chap nhan).
+    // Rút 1 sample đầu ra nếu có. 1 = đã phát (EmitSample), 0 = chưa có gì, -1 = lỗi.
+    // MFT đồng bộ: STREAM_CHANGE cho phép gọi lại ProcessOutput ngay (cùng 1 lần gọi).
+    // MFT bất đồng bộ: KHÔNG được gọi Process* ngoài sự kiện - renegotiate rồi return 0,
+    // chờ sự kiện HaveOutput mới (MFT tự phát lại sau khi kiểu đã được chấp nhận).
     int PullOneOutput() {
         const int maxAttempts = isAsync ? 1 : 2;
         for (int attempt = 0; attempt < maxAttempts; ++attempt) {
@@ -495,11 +495,11 @@ struct MfEncoder::Impl {
             if (hr == MF_E_TRANSFORM_STREAM_CHANGE) {
                 if (ob.pSample && outputProvidesSamples) ob.pSample->Release();
                 if (!RenegotiateOutputType()) return -1;
-                continue;  // dong bo: thu lai ngay. Bat dong bo: het luot (maxAttempts=1), return 0.
+                continue;  // đồng bộ: thử lại ngay. Bất đồng bộ: hết lượt (maxAttempts=1), return 0.
             }
             if (FAILED(hr)) {
                 if (ob.pSample && outputProvidesSamples) ob.pSample->Release();
-                std::printf("[MfEncoder] ProcessOutput that bai: 0x%08lX\n", (unsigned long)hr);
+                std::printf("[MfEncoder] ProcessOutput failed: 0x%08lX\n", (unsigned long)hr);
                 return -1;
             }
 
@@ -512,7 +512,7 @@ struct MfEncoder::Impl {
         return 0;
     }
 
-    // Duong dong bo: rut het output dang co cho toi khi MFT bao het (NEED_MORE_INPUT).
+    // Đường đồng bộ: rút hết output đang có cho tới khi MFT báo hết (NEED_MORE_INPUT).
     bool DrainOutputsSync() {
         for (;;) {
             int r = PullOneOutput();
@@ -521,8 +521,8 @@ struct MfEncoder::Impl {
         }
     }
 
-    // Duong bat dong bo: cho toi khi MFT bao san sang nhan input, xu ly output ranh
-    // duoc bao doc duong (khong duoc goi ProcessInput/Output ngoai su kien nhu the nay).
+    // Đường bất đồng bộ: chờ tới khi MFT báo sẵn sàng nhận input, xử lý output rảnh
+    // được báo dọc đường (không được gọi ProcessInput/Output ngoài sự kiện như thế này).
     bool WaitForNeedInputAsync() {
         for (;;) {
             ComPtr<IMFMediaEvent> ev;
@@ -534,7 +534,7 @@ struct MfEncoder::Impl {
                 if (PullOneOutput() < 0) return false;
                 continue;
             }
-            // Cac event khac (drain complete, marker...) - bo qua, cho tiep NeedInput.
+            // Các event khác (drain complete, marker...) - bỏ qua, chờ tiếp NeedInput.
         }
     }
 
@@ -596,7 +596,7 @@ struct MfEncoder::Impl {
         mft->ProcessMessage(MFT_MESSAGE_NOTIFY_END_STREAMING, 0);
         streaming = false;
         if (out) std::fflush(out);
-        std::printf("[MfEncoder] Da nen %llu frame, %.2f MB.\n",
+        std::printf("[MfEncoder] Encoded %llu frame, %.2f MB.\n",
                     (unsigned long long)frameCount, totalBytes / 1e6);
     }
 };

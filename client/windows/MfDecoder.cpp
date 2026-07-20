@@ -20,7 +20,7 @@ using Microsoft::WRL::ComPtr;
     do {                                                                          \
         HRESULT _hr = (expr);                                                     \
         if (FAILED(_hr)) {                                                        \
-            std::printf("[MfDecoder] %s that bai: 0x%08lX\n", (msg),              \
+            std::printf("[MfDecoder] %s failed: 0x%08lX\n", (msg),                \
                         (unsigned long)_hr);                                      \
             return false;                                                         \
         }                                                                         \
@@ -55,7 +55,7 @@ struct MfDecoder::Impl {
         cfg = c;
         onFrame = std::move(handler);
 
-        // MFT + video processor cham vao immediate context tu nhieu luong -> bat khoa.
+        // MFT + video processor chạm vào immediate context từ nhiều luồng -> bật khóa.
         ComPtr<ID3D10Multithread> mt;
         if (SUCCEEDED(device->QueryInterface(IID_PPV_ARGS(&mt)))) {
             mt->SetMultithreadProtected(TRUE);
@@ -64,8 +64,8 @@ struct MfDecoder::Impl {
         MFD_CHECK(MFStartup(MF_VERSION, MFSTARTUP_LITE), "MFStartup");
         mfStarted = true;
 
-        // Tim decoder MFT DONG BO (MFT async cua vendor can event-loop rieng, khong can
-        // thiet: MFT cua Microsoft van decode hardware qua D3D11VA khi co device manager).
+        // Tìm decoder MFT ĐỒNG BỘ (MFT async của vendor cần event-loop riêng, không cần
+        // thiết: MFT của Microsoft vẫn decode hardware qua D3D11VA khi có device manager).
         MFT_REGISTER_TYPE_INFO inInfo{ MFMediaType_Video, SubtypeFor(cfg.codec) };
         MFT_REGISTER_TYPE_INFO outInfo{ MFMediaType_Video, MFVideoFormat_NV12 };
         IMFActivate** activates = nullptr;
@@ -74,22 +74,22 @@ struct MfDecoder::Impl {
                             MFT_ENUM_FLAG_SYNCMFT | MFT_ENUM_FLAG_SORTANDFILTER,
                             &inInfo, &outInfo, &activates, &count),
                   "MFTEnumEx");
-        if (count == 0) { std::printf("[MfDecoder] Khong tim thay decoder MFT.\n"); return false; }
+        if (count == 0) { std::printf("[MfDecoder] No decoder MFT found.\n"); return false; }
         HRESULT hr = activates[0]->ActivateObject(IID_PPV_ARGS(&mft));
         for (UINT32 i = 0; i < count; ++i) activates[i]->Release();
         CoTaskMemFree(activates);
         MFD_CHECK(hr, "ActivateObject");
 
-        // Gan D3D11 device -> decode hardware, output NV12 nam ngay trong VRAM.
+        // Gán D3D11 device -> decode hardware, output NV12 nằm ngay trong VRAM.
         ComPtr<IMFAttributes> attrs;
         if (SUCCEEDED(mft->GetAttributes(&attrs))) {
             UINT32 aware = 0;
             attrs->GetUINT32(MF_SA_D3D11_AWARE, &aware);
             if (!aware) {
-                std::printf("[MfDecoder] MFT khong ho tro D3D11 - khong dung duoc.\n");
+                std::printf("[MfDecoder] MFT does not support D3D11 - unusable.\n");
                 return false;
             }
-            attrs->SetUINT32(MF_LOW_LATENCY, TRUE);  // tra frame ngay, khong giu buffer
+            attrs->SetUINT32(MF_LOW_LATENCY, TRUE);  // trả frame ngay, không giữ buffer
         }
         MFD_CHECK(MFCreateDXGIDeviceManager(&resetToken, &deviceManager),
                   "MFCreateDXGIDeviceManager");
@@ -98,7 +98,7 @@ struct MfDecoder::Impl {
                                       (ULONG_PTR)deviceManager.Get()),
                   "SET_D3D_MANAGER");
 
-        // Kieu dau vao: H.264/HEVC elementary stream (Annex-B).
+        // Kiểu đầu vào: H.264/HEVC elementary stream (Annex-B).
         ComPtr<IMFMediaType> inType;
         MFD_CHECK(MFCreateMediaType(&inType), "MFCreateMediaType(in)");
         inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
@@ -118,13 +118,13 @@ struct MfDecoder::Impl {
                   "NOTIFY_START_OF_STREAM");
         streaming = true;
 
-        std::printf("[MfDecoder] Khoi tao xong: %s, D3D11VA, low-latency.\n",
+        std::printf("[MfDecoder] Initialized: %s, D3D11VA, low-latency.\n",
                     cfg.codec == Codec::HEVC ? "HEVC" : "H264");
         return true;
     }
 
-    // Chon output NV12 trong danh sach MFT de nghi. Goi lai moi khi stream doi
-    // (MF_E_TRANSFORM_STREAM_CHANGE - vi du SPS bao kich thuoc khac).
+    // Chọn output NV12 trong danh sách MFT đề nghị. Gọi lại mỗi khi stream đổi
+    // (MF_E_TRANSFORM_STREAM_CHANGE - ví dụ SPS báo kích thước khác).
     bool NegotiateOutputType() {
         for (DWORD i = 0;; ++i) {
             ComPtr<IMFMediaType> t;
@@ -139,7 +139,7 @@ struct MfDecoder::Impl {
                 return true;
             }
         }
-        std::printf("[MfDecoder] MFT khong de nghi NV12.\n");
+        std::printf("[MfDecoder] MFT does not offer NV12.\n");
         return false;
     }
 
@@ -162,7 +162,7 @@ struct MfDecoder::Impl {
 
         HRESULT hr = mft->ProcessInput(0, sample.Get(), 0);
         if (hr == MF_E_NOTACCEPTING) {
-            // MFT day output -> rut het roi nap lai.
+            // MFT đầy output -> rút hết rồi nạp lại.
             if (!DrainOutputs()) return false;
             hr = mft->ProcessInput(0, sample.Get(), 0);
         }
@@ -178,8 +178,8 @@ struct MfDecoder::Impl {
             const bool mftProvides = (si.dwFlags & (MFT_OUTPUT_STREAM_PROVIDES_SAMPLES |
                                                     MFT_OUTPUT_STREAM_CAN_PROVIDE_SAMPLES)) != 0;
             if (!mftProvides) {
-                // Duong CPU (khong D3D) khong ho tro o GD2 - can VRAM cho renderer.
-                std::printf("[MfDecoder] MFT khong tu cap sample D3D - khong ho tro.\n");
+                // Đường CPU (không D3D) không hỗ trợ ở GD2 - cần VRAM cho renderer.
+                std::printf("[MfDecoder] MFT does not provide D3D samples - unsupported.\n");
                 return false;
             }
 
@@ -196,17 +196,17 @@ struct MfDecoder::Impl {
             }
             if (FAILED(hr)) {
                 if (ob.pSample) ob.pSample->Release();
-                std::printf("[MfDecoder] ProcessOutput that bai: 0x%08lX\n", (unsigned long)hr);
+                std::printf("[MfDecoder] ProcessOutput failed: 0x%08lX\n", (unsigned long)hr);
                 return false;
             }
 
             ComPtr<IMFSample> outSample;
-            outSample.Attach(ob.pSample);  // MFT cap sample, minh giu 1 ref -> tu release
+            outSample.Attach(ob.pSample);  // MFT cấp sample, mình giữ 1 ref -> tự release
             if (outSample && !Deliver(outSample.Get())) return false;
         }
     }
 
-    // Rut texture NV12 + subresource tu sample va goi callback.
+    // Rút texture NV12 + subresource từ sample và gọi callback.
     bool Deliver(IMFSample* sample) {
         ComPtr<IMFMediaBuffer> buffer;
         MFD_CHECK(sample->GetBufferByIndex(0, &buffer), "GetBufferByIndex");
@@ -246,14 +246,14 @@ bool MfDecoder::Decode(const uint8_t* data, size_t size, uint64_t timestampUs) {
     return impl_ && impl_->Decode(data, size, timestampUs);
 }
 
-// Factory (backend duy nhat hien tai). Sang GD3 neu can NVDEC thi them vao day.
+// Factory (backend duy nhất hiện tại). Sang GD3 nếu cần NVDEC thì thêm vào đây.
 std::unique_ptr<IVideoDecoder> CreateDecoder(ID3D11Device* device, const DecoderConfig& cfg,
                                              IVideoDecoder::FrameHandler onFrame) {
     auto dec = std::make_unique<MfDecoder>();
     if (dec->Init(device, cfg, std::move(onFrame))) {
-        std::printf("[Decoder] Dung backend: %ls\n", dec->BackendName());
+        std::printf("[Decoder] Using backend: %ls\n", dec->BackendName());
         return dec;
     }
-    std::printf("[Decoder] Khong khoi tao duoc backend nao.\n");
+    std::printf("[Decoder] Failed to initialize any backend.\n");
     return nullptr;
 }

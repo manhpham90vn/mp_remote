@@ -1,4 +1,4 @@
-// WindowCapture - hien thuc dung Windows Graphics Capture (winrt nam tron trong day).
+// WindowCapture - hiện thực dùng Windows Graphics Capture (winrt nằm trọn trong đây).
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #define _CRT_SECURE_NO_WARNINGS
@@ -16,7 +16,7 @@
 #include <winrt/Windows.Graphics.DirectX.h>
 #include <winrt/Windows.Graphics.DirectX.Direct3D11.h>
 
-// Hai header interop la cau noi giua the gioi WinRT va COM/D3D11 co.
+// Hai header interop là cầu nối giữa thế giới WinRT và COM/D3D11 cũ.
 #include <windows.graphics.capture.interop.h>
 #include <windows.graphics.directx.direct3d11.interop.h>
 
@@ -39,7 +39,7 @@ void InitRuntime() {
 }
 }  // namespace capture
 
-// Lay interface D3D11 goc ra khoi mot doi tuong WinRT (surface -> ID3D11Texture2D).
+// Lấy interface D3D11 gốc ra khỏi một đối tượng WinRT (surface -> ID3D11Texture2D).
 template <typename T>
 static winrt::com_ptr<T> GetDXGIInterface(winrt::Windows::Foundation::IInspectable const& obj) {
     auto access = obj.as<::Windows::Graphics::DirectX::Direct3D11::IDirect3DDxgiInterfaceAccess>();
@@ -75,22 +75,22 @@ struct WindowCapture::Impl {
             levels, ARRAYSIZE(levels), D3D11_SDK_VERSION,
             d3dDevice.put(), nullptr, d3dContext.put());
         if (FAILED(hr)) {
-            std::printf("D3D11CreateDevice that bai: 0x%08lX\n", (unsigned long)hr);
+            std::printf("D3D11CreateDevice failed: 0x%08lX\n", (unsigned long)hr);
             return false;
         }
         return true;
     }
 
-    // Chay tren luong thread-pool cua WGC. Rut het frame dang cho, xu ly tung cai.
+    // Chạy trên luồng thread-pool của WGC. Rút hết frame đang chờ, xử lý từng cái.
     void OnFrameArrived() {
         if (!framePool) return;
 
         while (auto frame = framePool.TryGetNextFrame()) {
             auto size = frame.ContentSize();
 
-            // Cua so doi kich thuoc -> tao lai pool, bo frame nay (frame sau se dung).
+            // Cửa sổ đổi kích thước -> tạo lại pool, bỏ frame này (frame sau sẽ dùng).
             if (size.Width != lastSize.Width || size.Height != lastSize.Height) {
-                std::printf("Cua so doi kich thuoc: %dx%d\n", size.Width, size.Height);
+                std::printf("Window size changed: %dx%d\n", size.Width, size.Height);
                 lastSize = size;
                 framePool.Recreate(
                     winrtDevice, wgdx::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, size);
@@ -105,13 +105,13 @@ struct WindowCapture::Impl {
                 info.texture = tex.get();
                 info.width = static_cast<uint32_t>(size.Width);
                 info.height = static_cast<uint32_t>(size.Height);
-                // SystemRelativeTime: don vi 100ns -> micro giay.
+                // SystemRelativeTime: đơn vị 100ns -> micro giây.
                 info.timestampUs =
                     static_cast<uint64_t>(frame.SystemRelativeTime().count()) / 10ull;
                 info.frameId = frameId.fetch_add(1);
                 onFrame(info);
             }
-            // `frame` va `tex` giai phong o cuoi vong lap -> texture het hieu luc.
+            // `frame` và `tex` giải phóng ở cuối vòng lặp -> texture hết hiệu lực.
         }
     }
 };
@@ -123,13 +123,13 @@ WindowCapture::~WindowCapture() { Stop(); }
 
 bool WindowCapture::Start(HWND hwnd, ID3D11Device* device, FrameHandler onFrame) {
     if (!wgc::GraphicsCaptureSession::IsSupported()) {
-        std::printf("Windows Graphics Capture khong duoc ho tro tren may nay.\n");
+        std::printf("Windows Graphics Capture is not supported on this machine.\n");
         return false;
     }
 
     impl_->onFrame = std::move(onFrame);
 
-    // 1. D3D11 device. Dung device chia se (tu GpuSelect) neu co, khong thi tu tao.
+    // 1. D3D11 device. Dùng device chia sẻ (từ GpuSelect) nếu có, không thì tự tạo.
     if (device) {
         impl_->d3dDevice.copy_from(device);
         impl_->d3dDevice->GetImmediateContext(impl_->d3dContext.put());
@@ -138,33 +138,33 @@ bool WindowCapture::Start(HWND hwnd, ID3D11Device* device, FrameHandler onFrame)
         return false;
     }
 
-    // 2. Boc D3D11 device thanh IDirect3DDevice cua WinRT.
+    // 2. Bọc D3D11 device thành IDirect3DDevice của WinRT.
     auto dxgiDevice = impl_->d3dDevice.as<IDXGIDevice>();
     winrt::com_ptr<::IInspectable> inspectable;
     winrt::check_hresult(
         CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice.get(), inspectable.put()));
     impl_->winrtDevice = inspectable.as<wgd3::IDirect3DDevice>();
 
-    // 3. Tao GraphicsCaptureItem tu HWND (chi lam duoc qua interop).
+    // 3. Tạo GraphicsCaptureItem từ HWND (chỉ làm được qua interop).
     auto factory = winrt::get_activation_factory<wgc::GraphicsCaptureItem>();
     auto interop = factory.as<IGraphicsCaptureItemInterop>();
     HRESULT hr = interop->CreateForWindow(
         hwnd, winrt::guid_of<wgc::GraphicsCaptureItem>(), winrt::put_abi(impl_->item));
     if (FAILED(hr)) {
-        std::printf("CreateForWindow that bai: 0x%08lX\n", (unsigned long)hr);
+        std::printf("CreateForWindow failed: 0x%08lX\n", (unsigned long)hr);
         return false;
     }
 
     impl_->lastSize = impl_->item.Size();
-    std::printf("Kich thuoc cua so: %dx%d\n", impl_->lastSize.Width, impl_->lastSize.Height);
+    std::printf("Window size: %dx%d\n", impl_->lastSize.Width, impl_->lastSize.Height);
 
-    // 4. Frame pool (free-threaded -> FrameArrived chay tren luong thread-pool).
+    // 4. Frame pool (free-threaded -> FrameArrived chạy trên luồng thread-pool).
     impl_->framePool = wgc::Direct3D11CaptureFramePool::CreateFreeThreaded(
         impl_->winrtDevice, wgdx::DirectXPixelFormat::B8G8R8A8UIntNormalized, 2, impl_->lastSize);
 
     impl_->session = impl_->framePool.CreateCaptureSession(impl_->item);
 
-    // 5. Tat con tro chuot (1903+) va vien vang (2004+) neu API co.
+    // 5. Tắt con trỏ chuột (1903+) và viền vàng (2004+) nếu API có.
     if (ApiInformation::IsPropertyPresent(
         L"Windows.Graphics.Capture.GraphicsCaptureSession", L"IsCursorCaptureEnabled")) {
         impl_->session.IsCursorCaptureEnabled(false);
@@ -175,18 +175,18 @@ bool WindowCapture::Start(HWND hwnd, ID3D11Device* device, FrameHandler onFrame)
             impl_->session.IsBorderRequired(false);
         }
         catch (winrt::hresult_error const&) {
-            // Mot so cau hinh doi quyen rieng - khong sao, chi la con vien vang.
+            // Một số cấu hình đòi quyền riêng - không sao, chỉ là còn viền vàng.
         }
     }
 
-    // 6. Dang ky su kien: cua so dong, va co frame moi.
+    // 6. Đăng ký sự kiện: cửa sổ đóng, và có frame mới.
     impl_->closedToken = impl_->item.Closed(
         [impl = impl_.get()](auto&&, auto&&) { impl->closed = true; });
     impl_->frameArrivedToken = impl_->framePool.FrameArrived(
         [impl = impl_.get()](auto&&, auto&&) { impl->OnFrameArrived(); });
 
     impl_->session.StartCapture();
-    std::printf("Da bat dau bat hinh (theo su kien FrameArrived).\n");
+    std::printf("Started capturing (via FrameArrived event).\n");
     return true;
 }
 

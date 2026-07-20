@@ -1,15 +1,15 @@
 #pragma once
 //
-// Renderer - cua so preview + DXGI swapchain, ve frame NV12 tu decoder.
+// Renderer - cửa sổ preview + DXGI swapchain, vẽ frame NV12 từ decoder.
 //
-// Thiet ke:
-//   - Chuyen mau NV12 -> BGRA + scale bang D3D11 Video Processor (phan cung,
-//     khong can viet shader). Input view tro thang vao texture pool cua decoder
-//     (kem array slice) -> zero-copy tu decode den swapchain.
-//   - Swapchain flip-model (FLIP_DISCARD) + Present(0) cho do tre thap.
-//   - Cua so tao va bom message tren luong GOI Init/Pump (main). RenderNV12 duoc
-//     phep goi tu luong khac (chuoi callback decode); device da bat
-//     multithread-protected nen immediate context an toan.
+// Thiết kế:
+//   - Chuyển màu NV12 -> BGRA + scale bằng D3D11 Video Processor (phần cứng,
+//     không cần viết shader). Input view trỏ thẳng vào texture pool của decoder
+//     (kèm array slice) -> zero-copy từ decode đến swapchain.
+//   - Swapchain flip-model (FLIP_DISCARD) + Present(0) cho độ trễ thấp.
+//   - Cửa sổ tạo và bơm message trên luồng GỌI Init/Pump (main). RenderNV12 được
+//     phép gọi từ luồng khác (chuỗi callback decode); device đã bật
+//     multithread-protected nên immediate context an toàn.
 //
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -27,49 +27,49 @@ public:
     Renderer(const Renderer&) = delete;
     Renderer& operator=(const Renderer&) = delete;
 
-    // Tao cua so (client ~ srcW x srcH, thu nho neu vuot man hinh) + swapchain
-    // tren `device` dung chung. Goi tren luong se Pump().
+    // Tạo cửa sổ (client ~ srcW x srcH, thu nhỏ nếu vượt màn hình) + swapchain
+    // trên `device` dùng chung. Gọi trên luồng sẽ Pump().
     bool Init(ID3D11Device* device, uint32_t srcW, uint32_t srcH, const wchar_t* title);
 
-    // Ve mot frame NV12 (texture + array slice tu decoder) len backbuffer va Present.
-    // `width`/`height` la kich thuoc hien thi thuc (co the nho hon texture do align).
+    // Vẽ một frame NV12 (texture + array slice từ decoder) lên backbuffer và Present.
+    // `width`/`height` là kích thước hiển thị thực (có thể nhỏ hơn texture do align).
     bool RenderNV12(ID3D11Texture2D* tex, UINT subresource, uint32_t width, uint32_t height);
 
-    // DEBUG: frame ke tiep se luu backbuffer ra BMP (truoc khi Present) de kiem chung.
+    // DEBUG: frame kế tiếp sẽ lưu backbuffer ra BMP (trước khi Present) để kiểm chứng.
     void RequestDumpBmp(const std::string& path);
 
-    // GD4: chuyen tiep message cua so cho ben ngoai (InputCapture) TRUOC khi
-    // Renderer xu ly. Tra true = da tieu thu, Renderer bo qua message do.
-    // Renderer khong biet gi ve ngu nghia input - chi lam duong ong.
+    // GD4: chuyển tiếp message cửa sổ cho bên ngoài (InputCapture) TRƯỚC khi
+    // Renderer xử lý. Trả true = đã tiêu thụ, Renderer bỏ qua message đó.
+    // Renderer không biết gì về ngữ nghĩa input - chỉ làm đường ống.
     using MessageHook = std::function<bool(HWND, UINT, WPARAM, LPARAM)>;
     void SetMessageHook(MessageHook hook);
 
-    // GD5: overlay tren cua so preview - 2 nut goc tren-phai. Renderer khong
-    // biet gi ve ngu nghia khoa chuot/tam dung, chi bao id nut vua bam ra ngoai
-    // (giong SetMessageHook), giong het duong phim tat F9/F10.
-    static constexpr int kBtnLock  = 1001; // == F9 (khoa/tha chuot tuong doi)
-    static constexpr int kBtnPause = 1002; // == F10 (tam dung/tiep tuc gui input)
+    // GD5: overlay trên cửa sổ preview - 2 nút góc trên-phải. Renderer không
+    // biết gì về ngữ nghĩa khóa chuột/tạm dừng, chỉ báo id nút vừa bấm ra ngoài
+    // (giống SetMessageHook), giống hệt đường phím tắt F9/F10.
+    static constexpr int kBtnLock  = 1001; // == F9 (khóa/thả chuột tương đối)
+    static constexpr int kBtnPause = 1002; // == F10 (tạm dừng/tiếp tục gửi input)
     using CommandHook = std::function<void(int id)>;
     void SetCommandHook(CommandHook hook);
 
-    // Dong chu so lieu (fps/kbps/mat goi/RTT/e2e) hien goc tren-trai cua so.
-    // Chi goi tu luong da Init/Pump.
+    // Dòng chữ số liệu (fps/kbps/mất gói/RTT/e2e) hiện góc trên-trái cửa sổ.
+    // Chỉ gọi từ luồng đã Init/Pump.
     void SetStatusText(const wchar_t* text);
 
-    // Dong bo trang thai 2 nut voi InputCapture khi nguoi dung doi bang phim tat
-    // thay vi click. Chi goi tu luong da Init/Pump.
+    // Đồng bộ trạng thái 2 nút với InputCapture khi người dùng đổi bằng phím tắt
+    // thay vì click. Chỉ gọi từ luồng đã Init/Pump.
     void SetToggleState(bool locked, bool paused);
 
-    // HWND cua so preview (nullptr neu chua Init) - de dang ky Raw Input.
+    // HWND cửa sổ preview (nullptr nếu chưa Init) - để đăng ký Raw Input.
     HWND Hwnd() const;
 
-    // Kich thuoc vung client (dung de chuan hoa toa do chuot).
+    // Kích thước vùng client (dùng để chuẩn hóa tọa độ chuột).
     void ClientSize(uint32_t& w, uint32_t& h) const;
 
-    // Bom message cua cua so - goi lap lai tren luong da Init.
+    // Bơm message của cửa sổ - gọi lặp lại trên luồng đã Init.
     void Pump();
 
-    // True khi nguoi dung dong cua so preview.
+    // True khi người dùng đóng cửa sổ preview.
     bool Closed() const;
 
 private:

@@ -9,9 +9,9 @@
 
 namespace {
 
-// Doi pixel man hinh -> toa do chuan hoa 0..65535 tren MAN HINH AO (toan bo
-// cac man hinh ghep lai). MOUSEEVENTF_VIRTUALDESK bat buoc khi may nhieu man
-// hinh, khong thi chuot bi ket o man hinh chinh.
+// Đổi pixel màn hình -> tọa độ chuẩn hóa 0..65535 trên MÀN HÌNH ẢO (toàn bộ
+// các màn hình ghép lại). MOUSEEVENTF_VIRTUALDESK bắt buộc khi máy nhiều màn
+// hình, không thì chuột bị kẹt ở màn hình chính.
 void ScreenToVirtualDesk(int px, int py, LONG& nx, LONG& ny) {
     const int vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
     const int vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
@@ -21,11 +21,11 @@ void ScreenToVirtualDesk(int px, int py, LONG& nx, LONG& ny) {
     ny = vh > 1 ? LONG(int64_t(py - vy) * 65535 / (vh - 1)) : 0;
 }
 
-// Windows chan SetForegroundWindow tu process khong giu focus. Cach chuan (moi
-// phan mem remote deu dung): tam GAN input queue cua minh vao luong dang so huu
-// cua so foreground - luc do minh duoc tinh la "cung mot luong nhap lieu" nen
-// SetForegroundWindow duoc phep. Gan xong phai go ra ngay, khong thi hai luong
-// dung chung trang thai ban phim/focus va sinh loi kho hieu.
+// Windows chặn SetForegroundWindow từ process không giữ focus. Cách chuẩn (mọi
+// phần mềm remote đều dùng): tạm GẮN input queue của mình vào luồng đang sở hữu
+// cửa sổ foreground - lúc đó mình được tính là "cùng một luồng nhập liệu" nên
+// SetForegroundWindow được phép. Gắn xong phải gỡ ra ngay, không thì hai luồng
+// dùng chung trạng thái bàn phím/focus và sinh lỗi khó hiểu.
 bool ForceForeground(HWND w) {
     if (SetForegroundWindow(w)) return true;
 
@@ -37,7 +37,7 @@ bool ForceForeground(HWND w) {
 
     bool ok = false;
     if (AttachThreadInput(myThread, fgThread, TRUE)) {
-        // Cua so bi thu nho/an thi SetForegroundWindow khong an thua.
+        // Cửa sổ bị thu nhỏ/ẩn thì SetForegroundWindow không ăn thua.
         ShowWindow(w, IsIconic(w) ? SW_RESTORE : SW_SHOW);
         BringWindowToTop(w);
         ok = SetForegroundWindow(w) != FALSE;
@@ -62,19 +62,19 @@ DWORD ButtonFlag(rgc::MouseButton b, bool down) {
 bool InputInjector::Init(HWND target) {
     if (!target || !IsWindow(target)) return false;
     target_ = target;
-    // Dua cua so dich len truoc de input toi dung no. Windows han che
-    // SetForegroundWindow tu process khong co focus -> best-effort, neu that bai
-    // thi nguoi dung o may host tu bam vao cua so mot lan la xong.
+    // Đưa cửa sổ đích lên trước để input tới đúng nó. Windows hạn chế
+    // SetForegroundWindow từ process không có focus -> best-effort, nếu thất bại
+    // thì người dùng ở máy host tự bấm vào cửa sổ một lần là xong.
     if (IsIconic(target_)) ShowWindow(target_, SW_RESTORE);
     if (!ForceForeground(target_))
-        std::printf("[Inject] Khong dua duoc cua so dich len truoc - hay bam vao cua so "
-                    "do mot lan o may nay (input chi bom khi no dang foreground).\n");
+        std::printf("[Inject] Could not bring the target window to the foreground - please click "
+                    "that window once on this machine (input is only injected while it's foreground).\n");
     return true;
 }
 
 void InputInjector::SetEnabled(bool on) {
     if (enabled_ == on) return;
-    if (!on) ReleaseAll(); // tat giua chung khong duoc de ket phim
+    if (!on) ReleaseAll(); // tắt giữa chừng không được để kẹt phím
     enabled_ = on;
 }
 
@@ -87,7 +87,7 @@ void InputInjector::SendKey(int32_t vk, int32_t scan, bool down) {
         in.ki.dwFlags |= KEYEVENTF_SCANCODE;
         if (scan & rgc::kScanExtended) in.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
     } else {
-        in.ki.wVk = WORD(vk); // client khong gui duoc scancode -> lui ve ma phim ao
+        in.ki.wVk = WORD(vk); // client không gửi được scancode -> lùi về mã phím ảo
     }
     SendInput(1, &in, sizeof(INPUT));
 }
@@ -108,7 +108,7 @@ void InputInjector::SendMoveAbsolute(int32_t nx, int32_t ny) {
     const int h = rc.bottom - rc.top;
     if (w <= 1 || h <= 1) return;
 
-    // Chuan hoa (khung hinh client nhin thay) -> pixel trong client rect dich.
+    // Chuẩn hóa (khung hình client nhìn thấy) -> pixel trong client rect đích.
     POINT pt{ LONG(int64_t(nx) * (w - 1) / 65535),
               LONG(int64_t(ny) * (h - 1) / 65535) };
     if (!ClientToScreen(target_, &pt)) return;
@@ -123,7 +123,7 @@ void InputInjector::SendMoveAbsolute(int32_t nx, int32_t ny) {
 void InputInjector::SendMoveRelative(int32_t dx, int32_t dy) {
     INPUT in{};
     in.type = INPUT_MOUSE;
-    in.mi.dwFlags = MOUSEEVENTF_MOVE; // khong ABSOLUTE = delta, dung cho game FPS
+    in.mi.dwFlags = MOUSEEVENTF_MOVE; // không ABSOLUTE = delta, dùng cho game FPS
     in.mi.dx = dx;
     in.mi.dy = dy;
     SendInput(1, &in, sizeof(INPUT));
@@ -131,16 +131,16 @@ void InputInjector::SendMoveRelative(int32_t dx, int32_t dy) {
 
 bool InputInjector::TargetHasFocus() {
     const HWND fg = GetForegroundWindow();
-    // Cua so dich hoac cua so con/popup cua no (hop thoai, menu) deu tinh la dung.
+    // Cửa sổ đích hoặc cửa sổ con/popup của nó (hộp thoại, menu) đều tính là đúng.
     const bool ok = fg && (fg == target_ || GetAncestor(fg, GA_ROOT) == target_);
     if (ok != hadFocus_) {
         hadFocus_ = ok;
         if (ok) {
-            std::printf("[Inject] Cua so chia se da co focus - input hoat dong tro lai.\n");
+            std::printf("[Inject] Shared window regained focus - input is active again.\n");
         } else {
-            std::printf("[Inject] Cua so chia se MAT focus - tam bo qua input tu client "
-                        "(khong bom nham vao ung dung khac).\n");
-            ReleaseAll(); // dang giu W ma mat focus -> nha ra, khong de ket phim
+            std::printf("[Inject] Shared window LOST focus - ignoring input from client for now "
+                        "(avoid injecting into another application).\n");
+            ReleaseAll(); // đang giữ W mà mất focus -> nhả ra, không để kẹt phím
         }
     }
     return ok;
@@ -154,7 +154,7 @@ void InputInjector::Apply(const rgc::InputEvent& e) {
     switch (e.type) {
     case rgc::InputType::Key: {
         const bool down = e.state != 0;
-        // Nho theo scancode de ReleaseAll nha dung phim da bom.
+        // Nhớ theo scancode để ReleaseAll nhả đúng phím đã bơm.
         if (down) keysDown_[e.b] = e.a;
         else      keysDown_.erase(e.b);
         SendKey(e.a, e.b, down);
@@ -186,21 +186,21 @@ void InputInjector::Apply(const rgc::InputEvent& e) {
 int InputInjector::SelfTest(HWND target, const char* text) {
     InputInjector inj;
     if (!inj.Init(target)) {
-        std::printf("[InjectTest] Cua so dich khong hop le.\n");
+        std::printf("[InjectTest] Invalid target window.\n");
         return 1;
     }
-    Sleep(1000); // cho cua so len foreground + game ve trang thai on dinh
-    // KHONG bom mu: neu cua so dich chua o foreground, phim se roi vao ung dung
-    // dang foreground (terminal, trinh duyet...) - go bay vao dung noi khong ngo.
+    Sleep(1000); // chờ cửa sổ lên foreground + game về trạng thái ổn định
+    // KHÔNG bơm mù: nếu cửa sổ đích chưa ở foreground, phím sẽ rơi vào ứng dụng
+    // đang foreground (terminal, trình duyệt...) - gõ bay vào đúng nơi không ngờ.
     if (!inj.TargetHasFocus()) {
-        std::printf("[InjectTest] DUNG: cua so dich khong o foreground. Bam vao cua so do "
-                    "roi chay lai (input se bi go nham vao ung dung dang mo).\n");
+        std::printf("[InjectTest] STOP: target window is not foreground. Click that window "
+                    "then run again (input would be typed into whatever app is open).\n");
         return 1;
     }
-    std::printf("[InjectTest] Cua so dich dang foreground - bat dau bom \"%s\".\n", text);
+    std::printf("[InjectTest] Target window is foreground - starting to inject \"%s\".\n", text);
 
-    // Dung dung duong ma client se gui: vk + scancode lay tu ban do ban phim
-    // hien hanh, KHONG dung ky tu - giong het event that tu Raw Input.
+    // Dùng đúng đường mà client sẽ gửi: vk + scancode lấy từ bản đồ bàn phím
+    // hiện hành, KHÔNG dùng ký tự - giống hệt event thật từ Raw Input.
     for (const char* p = text; *p; ++p) {
         const SHORT vkAll = VkKeyScanA(*p);
         if (vkAll == -1) continue;
@@ -219,7 +219,7 @@ int InputInjector::SelfTest(HWND target, const char* text) {
         }
         e.a = vk; e.b = scan;
         e.state = 1; inj.Apply(e);
-        Sleep(40); // game doc ban phim theo frame - nhan/nha qua nhanh se bi bo qua
+        Sleep(40); // game đọc bàn phím theo frame - nhấn/nhả quá nhanh sẽ bị bỏ qua
         e.state = 0; inj.Apply(e);
         if (needShift) {
             e.a = VK_SHIFT;
@@ -230,15 +230,15 @@ int InputInjector::SelfTest(HWND target, const char* text) {
         Sleep(15);
     }
     inj.ReleaseAll();
-    std::printf("[InjectTest] Da bom %llu event (bo qua %llu vi mat focus). "
-                "Kiem tra cua so dich.\n",
+    std::printf("[InjectTest] Injected %llu events (skipped %llu due to lost focus). "
+                "Check the target window.\n",
                 (unsigned long long)inj.applied(), (unsigned long long)inj.skipped());
     return inj.applied() ? 0 : 1;
 }
 
 void InputInjector::ReleaseAll() {
     if (keysDown_.empty() && buttonsDown_.empty()) return;
-    std::printf("[Inject] Nha %zu phim + %zu nut chuot con dang giu.\n",
+    std::printf("[Inject] Releasing %zu keys + %zu mouse buttons still held.\n",
                 keysDown_.size(), buttonsDown_.size());
     for (const auto& [scan, vk] : keysDown_) SendKey(vk, scan, false);
     for (auto btn : buttonsDown_)            SendButton(btn, false);

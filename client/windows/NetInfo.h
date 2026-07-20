@@ -1,16 +1,16 @@
 #pragma once
 //
-// NetInfo - liet ke dia chi IPv4 cua may theo tung card mang (Ethernet, Wi-Fi...).
-// Dung cho man hinh chinh kieu AnyDesk: hien "dia chi may nay" de nguoi dung
-// doc cho may kia --connect toi, va de agent in ra khi bat dau lang nghe.
+// NetInfo - liệt kê địa chỉ IPv4 của máy theo từng card mạng (Ethernet, Wi-Fi...).
+// Dùng cho màn hình chính kiểu AnyDesk: hiện "địa chỉ máy này" để người dùng
+// đọc cho máy kia --connect tới, và để agent in ra khi bắt đầu lắng nghe.
 //
 #include <string>
 #include <vector>
 
 struct AdapterAddr {
-    std::wstring name; // ten than thien cua adapter ("Ethernet", "Wi-Fi"...)
+    std::wstring name; // tên thân thiện của adapter ("Ethernet", "Wi-Fi"...)
     std::string  ip;   // "192.168.1.10"
 };
 
-// Chi tra ve adapter dang Up, bo loopback va dia chi APIPA 169.254.x.x.
+// Chỉ trả về adapter đang Up, bỏ loopback và địa chỉ APIPA 169.254.x.x.
 std::vector<AdapterAddr> ListLocalIPv4();
