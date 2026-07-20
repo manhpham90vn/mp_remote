@@ -1,5 +1,6 @@
 plugins {
     id("com.android.application")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
@@ -55,11 +56,20 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+
+    buildFeatures {
+        compose = true
+    }
 }
 dependencies {
-    // Hiện KHÔNG dòng code nào import androidx — UI chỉ dùng lớp framework
-    // (android.app.Activity, android.widget.*). Giữ lại vì nó là nền cho hầu hết
-    // thư viện Android sau này; bản 1.19.0 đòi compileSdk ≥ 37, đó là lý do
-    // compileSdk ở trên là 37 chứ không phải 36.
+    // core-ktx 1.19.0 đòi compileSdk ≥ 37 — đó là lý do compileSdk ở trên là 37.
     implementation("androidx.core:core-ktx:1.19.0")
+
+    // BOM giữ mọi artifact Compose cùng một thế hệ, nên các dòng dưới không ghi
+    // phiên bản. Đây là toàn bộ tầng UI; đường nóng video KHÔNG đi qua Compose.
+    implementation(platform("androidx.compose:compose-bom:2026.06.01"))
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-graphics")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.activity:activity-compose:1.13.0")
 }

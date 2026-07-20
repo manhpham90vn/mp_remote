@@ -1,121 +1,159 @@
 package com.rgc.remotegame
 
-import android.app.Activity
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.view.SurfaceHolder
 import android.view.SurfaceView
-import android.view.View
 import android.view.WindowManager
-import android.widget.FrameLayout
-import android.widget.TextView
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.delay
 
 /**
- * Màn hình xem. SurfaceView giữ nguyên vai trò cũ — bộ giải mã ghi thẳng vào
- * Surface của nó qua hardware composer, không frame nào đi qua tầng Java.
+ * Màn hình xem. Compose chỉ lo phần chrome (chữ trạng thái, bố cục) — khung hình
+ * KHÔNG đi qua Compose: bộ giải mã ghi thẳng vào Surface của SurfaceView qua
+ * hardware composer.
  *
- * Dùng SurfaceView chứ KHÔNG phải TextureView: TextureView đi qua view hierarchy,
- * thêm một lần copy GPU và khoảng một frame trễ.
+ * Dùng SurfaceView bọc trong AndroidView chứ KHÔNG phải TextureView: TextureView đi
+ * qua view hierarchy, thêm một lần copy GPU và khoảng một frame trễ.
  */
-class StreamActivity : Activity(), SurfaceHolder.Callback {
+class StreamActivity : ComponentActivity() {
 
-    private lateinit var surfaceView: SurfaceView
-    private lateinit var statusText: TextView
-    private lateinit var container: FrameLayout
-
-    private val handler = Handler(Looper.getMainLooper())
     private var started = false
-    private var appliedW = 0
-    private var appliedH = 0
 
-    private val poll = object : Runnable {
-        override fun run() {
-            updateUi()
-            handler.postDelayed(this, 500)
+    // Giữ ở Activity chứ không tạo trong composable: callback này phải sống đúng
+    // bằng vòng đời SurfaceView, không được dựng lại theo mỗi lần recomposition.
+    private val holderCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(holder: SurfaceHolder) {
+            NativeClient.nativeSetSurface(holder.surface)
+        }
+
+        override fun surfaceChanged(h: SurfaceHolder, f: Int, w: Int, ht: Int) {}
+
+        override fun surfaceDestroyed(holder: SurfaceHolder) {
+            // Chặn tới khi bộ giải mã buông surface — xem chú thích ở NativeClient.
+            NativeClient.nativeSetSurface(null)
         }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-        setContentView(R.layout.activity_stream)
-
-        container = findViewById(R.id.container)
-        surfaceView = findViewById(R.id.surface)
-        statusText = findViewById(R.id.status)
-        surfaceView.holder.addCallback(this)
 
         val addr = intent.getStringExtra("addr").orEmpty()
-        statusText.text = getString(R.string.connecting_to, addr)
-
         started = NativeClient.nativeStart(addr)
-        if (!started) {
-            statusText.text = getString(R.string.invalid_address, addr)
-            return
+
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                StreamScreen(
+                    address = addr,
+                    started = started,
+                    holderCallback = holderCallback,
+                    onDismiss = { finish() }
+                )
+            }
         }
-        handler.post(poll)
-    }
-
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        NativeClient.nativeSetSurface(holder.surface)
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {}
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        // Chặn tới khi bộ giải mã buông surface — xem chú thích ở NativeClient.
-        NativeClient.nativeSetSurface(null)
     }
 
     override fun onDestroy() {
-        handler.removeCallbacks(poll)
         if (started) NativeClient.nativeStop()
         super.onDestroy()
     }
+}
 
-    private fun updateUi() {
-        when (NativeClient.nativePhase()) {
-            NativeClient.PHASE_STREAMING -> {
-                applyAspect()
-                val line = NativeClient.nativeStatusLine()
-                statusText.text = line
-                statusText.visibility = if (line.isEmpty()) View.GONE else View.VISIBLE
+@Composable
+private fun StreamScreen(
+    address: String,
+    started: Boolean,
+    holderCallback: SurfaceHolder.Callback,
+    onDismiss: () -> Unit
+) {
+    var phase by remember { mutableIntStateOf(NativeClient.PHASE_IDLE) }
+    var statusLine by remember { mutableStateOf("") }
+    var endReason by remember { mutableStateOf("") }
+    var videoW by remember { mutableIntStateOf(0) }
+    var videoH by remember { mutableIntStateOf(0) }
+
+    // Hỏi trạng thái từ tầng C++ 500ms/lần. Rẻ hơn nhiều so với để C++ gọi ngược
+    // lên JVM mỗi frame, và overlay chỉ đổi mỗi giây một lần nên không cần nhanh hơn.
+    LaunchedEffect(started) {
+        if (!started) return@LaunchedEffect
+        while (true) {
+            phase = NativeClient.nativePhase()
+            statusLine = NativeClient.nativeStatusLine()
+            videoW = NativeClient.nativeVideoWidth()
+            videoH = NativeClient.nativeVideoHeight()
+            if (phase == NativeClient.PHASE_ENDED) {
+                endReason = NativeClient.nativeEndReason()
+                return@LaunchedEffect // hết phiên, thôi hỏi nữa
             }
-            NativeClient.PHASE_ENDED -> {
-                val reason = NativeClient.nativeEndReason()
-                statusText.visibility = View.VISIBLE
-                statusText.text = getString(R.string.disconnected, reason)
-                handler.removeCallbacks(poll)
-                container.setOnClickListener { finish() }
-            }
-            else -> statusText.visibility = View.VISIBLE
+            delay(500)
         }
     }
 
-    /**
-     * Đặt SurfaceView đúng tỉ lệ video thay vì kéo giãn đầy màn hình. Đây chính là
-     * thứ bản NativeActivity thuần không làm được: đổi kích thước Surface phải đi
-     * qua SurfaceHolder bên Java.
-     */
-    private fun applyAspect() {
-        val vw = NativeClient.nativeVideoWidth()
-        val vh = NativeClient.nativeVideoHeight()
-        if (vw <= 0 || vh <= 0) return
-        if (vw == appliedW && vh == appliedH) return
-
-        val cw = container.width
-        val ch = container.height
-        if (cw == 0 || ch == 0) return
-
-        // Khung lớn nhất vừa trong container mà vẫn đúng tỉ lệ video (letterbox).
-        val scale = minOf(cw.toFloat() / vw, ch.toFloat() / vh)
-        val lp = surfaceView.layoutParams as FrameLayout.LayoutParams
-        lp.width = (vw * scale).toInt()
-        lp.height = (vh * scale).toInt()
-        surfaceView.layoutParams = lp
-
-        appliedW = vw
-        appliedH = vh
+    val message = when {
+        !started -> stringResource(R.string.invalid_address, address)
+        phase == NativeClient.PHASE_ENDED -> stringResource(R.string.disconnected, endReason)
+        phase == NativeClient.PHASE_STREAMING -> statusLine
+        else -> stringResource(R.string.connecting_to, address)
     }
+
+    // Hết phiên thì chạm vào đâu cũng quay lại màn hình nhập địa chỉ.
+    val rootModifier = Modifier
+        .fillMaxSize()
+        .background(Color.Black)
+        .let { if (phase == NativeClient.PHASE_ENDED) it.clickable(onClick = onDismiss) else it }
+
+    Box(modifier = rootModifier, contentAlignment = Alignment.Center) {
+        if (started) {
+            // Modifier.aspectRatio lo luôn việc letterbox theo tỉ lệ video — đây là
+            // thứ bản NativeActivity thuần không làm nổi (phải tự tính layout params).
+            val videoModifier =
+                if (videoW > 0 && videoH > 0)
+                    Modifier.aspectRatio(videoW.toFloat() / videoH.toFloat())
+                else
+                    Modifier.fillMaxSize()
+
+            AndroidView(
+                factory = { ctx -> SurfaceView(ctx).apply { holder.addCallback(holderCallback) } },
+                modifier = videoModifier
+            )
+        }
+
+        if (message.isNotEmpty()) {
+            Text(
+                text = message,
+                color = Color.White,
+                fontSize = 13.sp,
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .background(Color(0xA0000000))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            )
+        }
+    }
+
 }

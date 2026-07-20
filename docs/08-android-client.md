@@ -1,7 +1,7 @@
 # GĐ3 — Client Android (view-only)
 
 Client Android đầu tiên, **chỉ xem** — chưa gửi input, chưa `LIST_SOURCES`.
-Mạng + giải mã là C++ (dùng lại `core/`), UI là Kotlin + View/XML.
+Mạng + giải mã là C++ (dùng lại `core/`), UI là Kotlin + Jetpack Compose.
 
 ## 1. Phân chia Kotlin / C++
 
@@ -14,13 +14,17 @@ phải build được bằng toolchain NDK). Nên toàn bộ `ClientSession` / `
 |----------------------------|-----------------------------|-------------------------------|
 | `UdpSocket.cpp` (winsock)  | `UdpSocket.cpp` (BSD)       | datagram vào/ra               |
 | `MfDecoder` + `Renderer`   | `MediaCodecDecoder`         | H.264 -> màn hình             |
-| `MainMenuWindow` (Win32)   | `MainActivity` (Kotlin)     | nhập địa chỉ, chọn kết nối    |
-| cửa sổ preview             | `StreamActivity` (Kotlin)   | SurfaceView + overlay số liệu |
+| `MainMenuWindow` (Win32)   | `MainActivity` (Compose)    | nhập địa chỉ, chọn kết nối    |
+| cửa sổ preview             | `StreamActivity` (Compose)  | SurfaceView + overlay số liệu |
 
 Ranh giới cố ý mỏng, gói gọn trong `JniBridge.cpp` + `NativeClient.kt`: Kotlin chỉ
 làm phần người dùng nhìn thấy và bơm Surface xuống; **không frame video nào đi qua
-JVM**. MediaCodec được configure thẳng với `ANativeWindow` lấy từ Surface của
-SurfaceView, nên đường nóng vẫn là bộ giải mã phần cứng -> hardware composer.
+JVM, và cũng không qua Compose**. Video nằm trong một `SurfaceView` bọc bằng
+`AndroidView`; MediaCodec được configure thẳng với `ANativeWindow` lấy từ Surface
+của nó, nên đường nóng vẫn là bộ giải mã phần cứng -> hardware composer. Compose chỉ
+vẽ phần chrome (ô nhập địa chỉ, chữ trạng thái) và cập nhật 500ms/lần.
+
+Tỉ lệ khung hình do `Modifier.aspectRatio(w/h)` lo — không phải tự tính layout params.
 
 > Bản đầu tiên là NativeActivity thuần native, không một dòng Kotlin. Bỏ vì nó
 > không có cách nào nhập địa chỉ host (phải truyền qua `adb --es addr`) và mọi
@@ -80,6 +84,8 @@ codec, để so sánh được với con số của client Windows.
 | AGP        | 9.3.0 | Đòi Gradle ≥ 9.5.0. |
 | Gradle     | 9.6.1 | Dưới 9.5.0 thì AGP 9.3 từ chối ngay ở `version-check`. |
 | Kotlin     | *tích hợp trong AGP* | **Không** khai `org.jetbrains.kotlin.android`: từ AGP 9, Kotlin nằm sẵn trong plugin Android, khai thêm là lỗi. Cũng vì thế không còn khối `kotlinOptions`/`kotlin { compilerOptions }`. |
+| Compose compiler | plugin `org.jetbrains.kotlin.plugin.compose` 2.4.10 | Từ Kotlin 2.0, bật `buildFeatures { compose = true }` mà thiếu plugin này là lỗi cấu hình. Nó **độc lập** với `kotlin.android` nên vẫn phải khai tay dù AGP 9 đã có Kotlin. |
+| Compose libs | BOM `2026.06.01` | BOM giữ mọi artifact Compose cùng thế hệ; các dòng `implementation` khác không ghi phiên bản. |
 | JDK        | 21 (JBR) | Ghim ở `~/.gradle/gradle.properties`, xem dưới. |
 | compileSdk | **37** | `androidx.core:core-ktx:1.19.0` đòi ≥ 37. Phải cài `platforms;android-37.0` bằng sdkmanager. |
 | targetSdk  | 36 | Cố tình thấp hơn compileSdk: biên dịch với API mới nhất nhưng chỉ cam kết hành vi ở mức đã kiểm chứng. |
@@ -172,7 +178,6 @@ Một ngoại lệ có lý do: `~/.gradle/gradle.properties` để comment tiế
 
 - **Chỉ nguồn 0**: chưa gửi `LIST_SOURCES` nên host chia sẻ nhiều cửa sổ thì luôn
   xem cửa sổ đầu. Cần thêm màn hình chọn nguồn.
-- **Tỉ lệ khung hình** đã xử lý (`StreamActivity.applyAspect()`, letterbox) nhưng
-  **chưa kiểm chứng bằng video thật** — chưa có frame nào để nhìn.
+- **Số đo e2e sai** (xem §6).
 - **Chưa gửi input** (GĐ4 cho Android).
 - **Chỉ `arm64-v8a`**.
