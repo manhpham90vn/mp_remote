@@ -140,7 +140,9 @@ int RunAgent(HWND target, const AgentOptions& opt) {
 
     auto onFrame = [&](const FrameInfo& fi) {
         captured.fetch_add(1, std::memory_order_relaxed);
-        if (!srcW.load()) { srcW.store(fi.width); srcH.store(fi.height); }
+        // NV12 lấy mẫu chroma 2x2 -> bề rộng/cao lẻ làm CreateTexture2D(NV12) trả
+        // E_INVALIDARG. Làm tròn xuống số chẵn; cột/hàng lẻ dư bị source rect cắt bỏ.
+        if (!srcW.load()) { srcW.store(fi.width & ~1u); srcH.store(fi.height & ~1u); }
         if (failed.load()) return;
 
         std::lock_guard<std::mutex> lk(encMutex);
