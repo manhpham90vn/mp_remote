@@ -113,6 +113,11 @@ struct MfEncoder::Impl {
     bool     outputProvidesSamples = false;
     bool     haveFirstTs = false;
     uint64_t firstTsUs = 0;
+    // Số sự kiện METransformNeedInput đã tiêu thụ TRƯỚC bởi PumpAsyncEvents —
+    // WaitForNeedInputAsync trừ dần thay vì chặn chờ sự kiện đã lấy mất.
+    int       needInputCredit = 0;
+    ULONGLONG lastEncodeTickMs = 0; // phát hiện nhịp input thưa (nguồn tĩnh/keepalive)
+    bool      rcLogged = false;     // log kết quả CodecAPI đúng một lần (Reinit gọi lại)
     uint64_t frameCount = 0;
     uint64_t totalBytes = 0;
     FILE*    out = nullptr;
@@ -263,6 +268,11 @@ struct MfEncoder::Impl {
         events.Reset();
         codecApi.Reset();
         streaming = false;
+        // Credit NeedInput thuộc về hàng sự kiện của transform CŨ — mang sang
+        // transform mới là ProcessInput chạy khi nó chưa sẵn sàng, hỏng dây chuyền
+        // (đo 2026-07-21: 18,5s không gói nào ra sau một lần xin IDR).
+        needInputCredit = 0;
+        lastEncodeTickMs = 0;
         if (!activate) return false;
         activate->ShutdownObject();
         if (FAILED(activate->ActivateObject(IID_PPV_ARGS(&mft)))) {
@@ -327,28 +337,42 @@ struct MfEncoder::Impl {
             std::printf("[MfEncoder] Failed to get ICodecAPI - using MFT default parameters.\n");
             return true;
         }
-        auto setUI4 = [&](const GUID& api, ULONG val) {
-            if (!codecApi->IsSupported(&api)) return;
+        // Log kết quả từng thuộc tính ĐÚNG MỘT LẦN (ReinitTransform gọi lại hàm này
+        // mỗi lần xin IDR trên QSV): driver nuốt lệnh im lặng thì không bao giờ biết
+        // vì sao rate control không ăn — đo 2026-07-21 VBV bị phớt lờ, IDR vẫn 195KB.
+        const bool log = !rcLogged;
+        auto report = [&](const char* name, const char* what) {
+            if (log) std::printf("[MfEncoder] codecapi %s: %s\n", name, what);
+        };
+        auto setUI4 = [&](const GUID& api, ULONG val, const char* name) {
+            if (!codecApi->IsSupported(&api)) { report(name, "NOT SUPPORTED"); return; }
             VARIANT v{}; v.vt = VT_UI4; v.ulVal = val;
-            codecApi->SetValue(&api, &v);
+            report(name, SUCCEEDED(codecApi->SetValue(&api, &v)) ? "ok" : "SetValue FAILED");
         };
-        auto setBool = [&](const GUID& api, bool val) {
-            if (!codecApi->IsSupported(&api)) return;
+        auto setBool = [&](const GUID& api, bool val, const char* name) {
+            if (!codecApi->IsSupported(&api)) { report(name, "NOT SUPPORTED"); return; }
             VARIANT v{}; v.vt = VT_BOOL; v.boolVal = val ? VARIANT_TRUE : VARIANT_FALSE;
-            codecApi->SetValue(&api, &v);
+            report(name, SUCCEEDED(codecApi->SetValue(&api, &v)) ? "ok" : "SetValue FAILED");
         };
-        setUI4(CODECAPI_AVEncCommonRateControlMode, (ULONG)eAVEncCommonRateControlMode_CBR);
-        setUI4(CODECAPI_AVEncCommonMeanBitRate, (ULONG)cfg.bitrateBps);
-        setBool(CODECAPI_AVEncCommonLowLatency, true);
-        setBool(CODECAPI_AVLowLatencyMode, true);
-        setUI4(CODECAPI_AVEncMPVGOPSize, 0x7fffffff);  // ~vô hạn, IDR theo yêu cầu
+        setUI4(CODECAPI_AVEncCommonRateControlMode, (ULONG)eAVEncCommonRateControlMode_CBR,
+               "RateControlMode=CBR");
+        setUI4(CODECAPI_AVEncCommonMeanBitRate, (ULONG)cfg.bitrateBps, "MeanBitRate");
+        setBool(CODECAPI_AVEncCommonLowLatency, true, "CommonLowLatency");
+        setBool(CODECAPI_AVLowLatencyMode, true, "LowLatencyMode");
+        setUI4(CODECAPI_AVEncMPVGOPSize, 0x7fffffff, "GOPSize");  // ~vô hạn, IDR theo yêu cầu
         // VBV ~2 frame (đơn vị BIT): trần cho cú dồn của một frame. Không có nó,
         // QSV đẻ IDR ~196 KB — gấp ~5 lần ngân sách frame @20Mbps/60fps (đo
         // 2026-07-21) — thành chùm 160+ gói, đúng thủ phạm burst-loss trên Wi-Fi
         // (docs/06 §7b). NVENC đã bị ép VBV 1 frame từ trước (NvencEncoder.cpp:148);
         // QSV cho 2 frame để IDR còn chỗ thở, chất lượng đỡ sụt ở cảnh động.
         const ULONG frameBits = (ULONG)(cfg.bitrateBps / (cfg.fps ? cfg.fps : 60));
-        setUI4(CODECAPI_AVEncCommonBufferSize, frameBits * 2);
+        setUI4(CODECAPI_AVEncCommonBufferSize, frameBits * 2, "BufferSize(VBV)");
+        // Mức đầy ban đầu của VBV: transform MỚI (mỗi lần xin IDR trên QSV là một
+        // transform mới — ReinitTransform) khởi đầu với buffer rủng rỉnh nên IDR
+        // đầu tiên vượt trần (đo 2026-07-21: 273KB dù trần 2 frame ~83KB). Khai
+        // mức đầu = 1 frame để IDR mở màn cũng phải theo khuôn khổ.
+        setUI4(CODECAPI_AVEncCommonBufferInLevel, frameBits, "BufferInLevel");
+        rcLogged = true;
         return true;
     }
 
@@ -610,9 +634,24 @@ struct MfEncoder::Impl {
     // Đường bất đồng bộ: chờ tới khi MFT báo sẵn sàng nhận input, xử lý output rảnh
     // được báo dọc đường (không được gọi ProcessInput/Output ngoài sự kiện như thế này).
     bool WaitForNeedInputAsync() {
-        for (;;) {
+        // NeedInput đã được PumpAsyncEvents lấy trước rồi thì khỏi chặn chờ.
+        if (needInputCredit > 0) { --needInputCredit; return true; }
+        // Chờ CÓ HẠN (poll NO_WAIT + ngủ 1ms, trần 1s) thay vì GetEvent chặn vô
+        // hạn: encode chạy dưới encMutex trên cả thread Recv (keepalive/IDR tĩnh),
+        // GetEvent treo là thread Recv treo theo — đo 2026-07-21 thấy RTT nhảy
+        // 0,7↔380ms và 18,5s không gói nào ra. Hết hạn = frame này hỏng, phiên sống.
+        for (int waitedMs = 0;;) {
             ComPtr<IMFMediaEvent> ev;
-            MF_CHECK(events->GetEvent(0, &ev), "GetEvent");
+            const HRESULT hr = events->GetEvent(MF_EVENT_FLAG_NO_WAIT, &ev);
+            if (hr == MF_E_NO_EVENTS_AVAILABLE) {
+                if (waitedMs++ >= 1000) {
+                    std::printf("[MfEncoder] Timed out waiting for encoder NeedInput.\n");
+                    return false;
+                }
+                Sleep(1);
+                continue;
+            }
+            MF_CHECK(hr, "GetEvent");
             MediaEventType met = MEUnknown;
             MF_CHECK(ev->GetType(&met), "GetType");
             if (met == METransformNeedInput) return true;
@@ -621,6 +660,41 @@ struct MfEncoder::Impl {
                 continue;
             }
             // Các event khác (drain complete, marker...) - bỏ qua, chờ tiếp NeedInput.
+        }
+    }
+
+    // Vét sự kiện async NGAY SAU ProcessInput, không chặn (NO_WAIT).
+    //
+    // VÌ SAO PHẢI CÓ: không có nó, output chỉ được rút bên trong
+    // WaitForNeedInputAsync của lần Encode KẾ TIẾP, mà QSV lại xếp sẵn nhiều
+    // NeedInput lúc khởi động — output bị giam sau hàng sự kiện. Input càng thưa
+    // thì trễ càng dồn: nguồn tĩnh + keepalive 2fps đo được e2e ~3,4s = ~7 frame
+    // × 500ms (2026-07-21). Vét ở đây thì frame thoát ra trong vài ms sau khi nén
+    // xong. NeedInput vét được cộng vào `needInputCredit` cho lần Encode sau.
+    //
+    // `waitForOutput` chỉ bật khi nhịp input thưa (>100ms — đường keepalive):
+    // ngủ 1ms/vòng, tối đa ~30ms, chờ encoder nhả CHÍNH frame vừa đưa vào.
+    // Ở 60fps không bao giờ ngủ — đường nóng giữ nguyên (bài học Pacer, docs/06).
+    bool PumpAsyncEvents(bool waitForOutput) {
+        int sleepBudgetMs = 30;
+        for (;;) {
+            ComPtr<IMFMediaEvent> ev;
+            const HRESULT hr = events->GetEvent(MF_EVENT_FLAG_NO_WAIT, &ev);
+            if (hr == MF_E_NO_EVENTS_AVAILABLE) {
+                if (!waitForOutput || sleepBudgetMs-- <= 0) return true;
+                Sleep(1);
+                continue;
+            }
+            if (FAILED(hr)) return true; // đường vét phụ — không giết phiên vì nó
+            MediaEventType met = MEUnknown;
+            ev->GetType(&met);
+            if (met == METransformNeedInput) {
+                ++needInputCredit;
+            } else if (met == METransformHaveOutput) {
+                const int r = PullOneOutput();
+                if (r < 0) return false;
+                if (r > 0) waitForOutput = false; // frame đã ra — vét nốt rồi thôi chờ
+            }
         }
     }
 
@@ -664,7 +738,15 @@ struct MfEncoder::Impl {
         }
         MF_CHECK(hr, "ProcessInput");
 
-        return isAsync ? true : DrainOutputsSync();
+        if (isAsync) {
+            // Nhịp input thưa (>100ms = nguồn tĩnh/keepalive) thì đáng bỏ vài ms
+            // chờ vét output của chính frame này — xem PumpAsyncEvents.
+            const ULONGLONG nowMs = GetTickCount64();
+            const bool sparse = lastEncodeTickMs && nowMs - lastEncodeTickMs > 100;
+            lastEncodeTickMs = nowMs;
+            return PumpAsyncEvents(sparse);
+        }
+        return DrainOutputsSync();
     }
 
     // Vét nốt những frame encoder còn giữ rồi đóng stream. DRAIN bảo MFT "không còn

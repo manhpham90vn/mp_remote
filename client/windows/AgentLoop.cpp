@@ -157,11 +157,15 @@ struct SourcePipeline {
     // Đo thời gian một lần Encode + cộng vào bộ đếm cửa sổ. Gọi từ CẢ HAI thread.
     void DiagEncode(IVideoEncoder* enc, ID3D11Texture2D* tex, bool idr) {
         const uint64_t t0 = NowUs();
-        enc->Encode(tex, t0, idr);
+        const bool ok = enc->Encode(tex, t0, idr);
         const uint32_t ms = uint32_t((NowUs() - t0) / 1000);
         dgEncMsSum.fetch_add(ms, std::memory_order_relaxed);
         dgEncCount.fetch_add(1, std::memory_order_relaxed);
         DiagAtomicMax(dgEncMsMax, ms);
+        // Encode hỏng trên đường keepalive/IDR tĩnh trước giờ bị nuốt im lặng —
+        // nguồn tĩnh mà encoder chết là client trắng hình không dấu vết.
+        if (!ok)
+            std::printf("[DIAG][%s] evt=enc_fail idr=%d ms=%u\n", name.c_str(), idr ? 1 : 0, ms);
     }
 };
 
