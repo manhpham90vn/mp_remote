@@ -189,10 +189,15 @@ void ClientLoop::DecodeThread() {
         }
 
         // 4) Giải mã và render. Đo thời gian để phát hiện máy quá yếu hoặc codec đang
-        //    vật lộn: quá 20 ms cho một frame là đã chậm hơn nhịp 60 fps.
+        //    vật lộn: quá 20 ms cho một frame là đã chậm hơn nhịp 60 fps. Cộng vào
+        //    bộ đếm cửa sổ 1s cho dòng [DIAG] (t_dec, xem docs/09).
         const uint64_t t0 = NowUs();
         const bool ok = decoder.Decode(f.nal.data(), f.nal.size(), f.timestampUs);
         const uint64_t decMs = (NowUs() - t0) / 1000;
+        dgDecMsSum_.fetch_add(uint32_t(decMs), std::memory_order_relaxed);
+        dgDecCount_.fetch_add(1, std::memory_order_relaxed);
+        if (uint32_t(decMs) > dgDecMsMax_.load(std::memory_order_relaxed))
+            dgDecMsMax_.store(uint32_t(decMs), std::memory_order_relaxed);
         if (decMs > 20)
             LOGW("[Client] decode+render took %" PRIu64 " ms for one frame", decMs);
 
@@ -306,6 +311,13 @@ void ClientLoop::NetThread() {
     uint64_t stBytes = 0;
     rgc::LinkStats linkStats(NowUs());
 
+    // Bộ đếm chẩn đoán cửa sổ 1s, chỉ thread Net chạm (xem docs/09). Trên Android
+    // không có cờ RGC_DIAG — logcat lọc theo tag được nên [DIAG] bật luôn.
+    uint32_t dgAsmMsSum = 0, dgAsmMsMax = 0, dgAsmCount = 0; // t_asm: mảnh đầu → ghép xong
+    uint32_t dgDqDrop = 0;                                   // frame vứt vì hàng đợi đầy
+    uint32_t dgLoopBusyMaxMs = 0;                            // vòng Net bận nhất
+    uint64_t kfReqUs = 0; // thời điểm bắt đầu xin keyframe; 0 = không treo
+
     while (!quit_.load()) {
         NetAddr from;
         const int n = sock_.RecvFrom(buf, sizeof(buf), from);
@@ -332,6 +344,23 @@ void ClientLoop::NetThread() {
                     if (!reasm) {
                         const uint32_t fps = session.params().fps ? session.params().fps : 60;
                         reasm = std::make_unique<rgc::Reassembler>(1'000'000 / fps);
+                        // Bản khám nghiệm từng frame bị khai tử (docs/09): pos=tail
+                        // là dấu vân tay của burst — chùm mất nằm ở đuôi frame.
+                        reasm->onFrameDrop = [](const rgc::Reassembler::FrameDropInfo& d) {
+                            static const char* const kReason[] =
+                                {"timeout", "overtaken", "evicted", "pre_idr"};
+                            const char* pos = "-";
+                            if (d.missing) {
+                                const bool head = d.firstMissing == 0;
+                                const bool tail = d.lastMissing + 1 == d.total;
+                                pos = head && tail ? "all" : tail ? "tail"
+                                                   : head ? "head" : "mid";
+                            }
+                            LOGW("[DIAG] evt=frame_drop id=%u reason=%s miss=%u/%u pos=%s"
+                                 " idr=%u waited_ms=%u got_bytes=%u",
+                                 d.frameId, kReason[size_t(d.reason)], d.missing, d.total,
+                                 pos, d.idr ? 1 : 0, d.waitedMs, d.bytesGot);
+                        };
                     }
                     if (h->type == rgc::MsgType::FecPacket) {
                         if (const auto v = rgc::ParseFecPacket(*h, pl)) {
@@ -350,11 +379,36 @@ void ClientLoop::NetThread() {
             }
         }
 
+        // Gom mọi đường dẫn tới "xin IDR" về một chỗ, kèm lý do và mốc thời gian
+        // (docs/09): log cho thấy vòng xoáy IDR (xin dồn dập, IDR về chậm) nếu có.
+        // Gọi lặp là vô hại: chỉ log ở lần chuyển từ "không treo" sang "đang treo".
+        auto requestKf = [&](const char* reason) {
+            if (!kfReqUs) {
+                kfReqUs = now;
+                LOGI("[DIAG] evt=kf_req reason=%s", reason);
+            }
+            session.RequestKeyframe();
+        };
+
         if (reasm) {
             // Vét hết frame đã đủ mảnh: một lần recvfrom có thể hoàn thành nhiều frame.
             while (auto f = reasm->PopReady(now)) {
                 // IDR đã về → thôi xin keyframe, kẻo host phát IDR liên tục.
-                if (f->idr) session.CancelKeyframeRequest();
+                if (f->idr) {
+                    session.CancelKeyframeRequest();
+                    if (kfReqUs) {
+                        LOGI("[DIAG] evt=idr_rx bytes=%zu after_ms=%" PRIu64,
+                             f->nal.size(), (now - kfReqUs) / 1000);
+                        kfReqUs = 0;
+                    }
+                }
+                // t_asm: mảnh đầu tiên tới → frame ghép xong và rời Reassembler.
+                if (f->firstSeenUs) {
+                    const uint32_t asmMs = uint32_t((now - f->firstSeenUs) / 1000);
+                    dgAsmMsSum += asmMs;
+                    ++dgAsmCount;
+                    if (asmMs > dgAsmMsMax) dgAsmMsMax = asmMs;
+                }
                 {
                     std::lock_guard<std::mutex> lk(decMutex_);
                     // Hàng đợi đầy: VỨT frame CŨ NHẤT chứ không chặn thread Net và
@@ -363,17 +417,19 @@ void ClientLoop::NetThread() {
                     if (decQueue_.size() >= kMaxQueuedFrames) {
                         decQueue_.pop_front();
                         queueOverflow_.store(true, std::memory_order_release);
+                        ++dgDqDrop;
                     }
                     decQueue_.push_back(std::move(*f));
                 }
                 decCv_.notify_one();
             }
-            if (reasm->TakeLossEvent() || reasm->WaitingForIdr()) session.RequestKeyframe();
+            if (reasm->TakeLossEvent()) requestKf("loss");
+            else if (reasm->WaitingForIdr()) requestKf("wait_idr");
         }
         // Hai lý do còn lại đến từ thread Decode. exchange() đọc-và-xoá nguyên tử:
         // xin một lần cho mỗi sự cố, không lặp lại mãi ở các vòng sau.
-        if (decodeFailed_.exchange(false, std::memory_order_acq_rel)) session.RequestKeyframe();
-        if (queueOverflow_.exchange(false, std::memory_order_acq_rel)) session.RequestKeyframe();
+        if (decodeFailed_.exchange(false, std::memory_order_acq_rel)) requestKf("dec_fail");
+        if (queueOverflow_.exchange(false, std::memory_order_acq_rel)) requestKf("q_overflow");
 
         session.Tick(now);
         if (session.state() == rgc::ClientSession::State::Dead) break;
@@ -425,8 +481,33 @@ void ClientLoop::NetThread() {
 
             session.SendFeedback(rgc::MakeFeedback(w, session.lastRttUs()));
 
+            // Dòng chẩn đoán 1s (docs/09) — đọc-và-reset mọi bộ đếm cửa sổ.
+            // late= là con số phân xử "mất thật vs tới muộn" (docs/06 §7b).
+            {
+                const uint32_t dc = dgDecCount_.exchange(0, std::memory_order_relaxed);
+                const uint32_t ds = dgDecMsSum_.exchange(0, std::memory_order_relaxed);
+                const uint32_t dm = dgDecMsMax_.exchange(0, std::memory_order_relaxed);
+                LOGI("[DIAG] evt=sum asm_ms=%.1f/%u dec_ms=%.1f/%u dq_drop=%u"
+                     " late=%" PRIu64 " late_ms_avg=%.0f late_ms_max=%" PRIu64
+                     " gap_ms_max=%u loop_busy_ms_max=%u",
+                     dgAsmCount ? double(dgAsmMsSum) / dgAsmCount : 0.0, dgAsmMsMax,
+                     dc ? double(ds) / dc : 0.0, dm,
+                     dgDqDrop,
+                     w.latePackets, w.lateMsAvg, w.lateMsMax,
+                     reasm ? reasm->TakeMaxGapMs() : 0, dgLoopBusyMaxMs);
+                dgAsmMsSum = dgAsmMsMax = dgAsmCount = 0;
+                dgDqDrop = 0;
+                dgLoopBusyMaxMs = 0;
+            }
+
             stBytes = 0;
         }
+
+        // Vòng này bận bao lâu (từ lúc recvfrom trả về tới đây). Thread Net nghẽn
+        // thì buffer UDP của kernel gánh — tràn là mất gói thật.
+        const uint32_t busyMs = uint32_t((NowUs() - now) / 1000);
+        if (busyMs > dgLoopBusyMaxMs) dgLoopBusyMaxMs = busyMs;
+        if (busyMs > 50) LOGW("[DIAG] evt=recv_stall busy_ms=%u", busyMs);
     }
 
     // Chào host trước khi đi, gửi một lần và không chờ hồi đáp. Không bắt buộc —

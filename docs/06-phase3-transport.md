@@ -334,6 +334,11 @@ khả năng một phần con số "mất" thật ra là **tới muộn**: Reasse
 trước khi đuôi kịp tới rồi tính phần đuôi là mất. Cần tách bạch hai thứ này bằng đo
 riêng trước khi thiết kế lại bất cứ thứ gì — chưa đo thì chưa biết loss thật bao nhiêu.
 
+**Phép đo đã được cài** (2026-07-21): `Reassembler` giữ "nghĩa địa" các frame vừa khai
+tử và đếm gói của chúng còn lết về sau đó — trường `late=` trong log `[DIAG]`, kèm
+khám nghiệm từng frame bị bỏ (`evt=frame_drop pos=tail/...`) và cỡ từng IDR phía host
+(`evt=idr bytes=`). Cách thu log và bảng tra triệu chứng: `09-diagnostics.md`.
+
 ## 8. Thứ tự triển khai
 
 1. ✅ Lập thư viện `core/` (CMake target `core`, app link vào; toàn repo build

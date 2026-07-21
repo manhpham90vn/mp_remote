@@ -21,7 +21,8 @@
 //       └─ mỗi vòng      → mất gói? xin IDR ; Tick ; thống kê + FEEDBACK mỗi 1s
 //
 //   THREAD DECODE (mỗi nguồn một cái):
-//       rút frame khỏi hàng đợi → MfDecoder.Decode → Renderer.RenderNV12.
+//       dựng decoder (lười, ~150ms — vì vậy KHÔNG dựng trên thread Recv)
+//       → rút frame khỏi hàng đợi → MfDecoder.Decode → Renderer.RenderNV12.
 //
 // VÌ SAO DECODE PHẢI TÁCH KHỎI RECV — lý do quan trọng nhất của cả file
 //   Decode + render GPU có thể mất vài chục mili-giây khi máy bận. Nếu việc đó chặn
@@ -64,6 +65,7 @@
 #include "decode/IVideoDecoder.h"
 #include "decode/Renderer.h"
 #include "rgcp/Clock.h"
+#include "Diag.h"
 
 #include "rgc/control/LinkStats.h"
 #include "rgc/session/ClientSession.h"
@@ -134,7 +136,12 @@ struct ClientStream {
 // nuôi timeout và thoát khỏi trạng thái Starting.
 void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* device) {
     std::unique_ptr<rgc::Reassembler> reasm; // tạo sau khi biết fps đàm phán
-    std::unique_ptr<IVideoDecoder> decoder;  // tạo ở đây, chỉ Decode() trên thread Decode
+    // Decoder tạo VÀ dùng trên thread Decode: MfDecoder init mất ~150ms, dựng nó
+    // trên thread Recv là recvfrom ngừng nghe đúng lúc IDR mở màn đang dồn về
+    // (đo được recv_stall busy_ms=148, 2026-07-21). Tham số đàm phán đi qua bộ
+    // atomic decW/decH/decFps — thread Recv ghi khi biết, thread Decode đọc khi dựng.
+    std::unique_ptr<IVideoDecoder> decoder;
+    std::atomic<uint32_t> decW{0}, decH{0}, decFps{0};
 
     // Ước lượng trễ e2e — ghi ở thread Recv, đọc ở thread Decode (trong onDecoded).
     std::atomic<int64_t>  ackDeltaUs{0};  // t_client_nhận_ACK − timebase_host
@@ -147,10 +154,27 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
     constexpr size_t kMaxQueuedFrames = 3;
     std::mutex decQueueMutex;
     std::condition_variable decQueueCv;
-    std::deque<rgc::Reassembler::Frame> decQueue;
+    // Frame kèm thời điểm vào hàng — để đo t_queue (K1): nằm chờ lâu nghĩa là
+    // thread Decode không theo kịp, khác hẳn với mạng chậm hay ghép chậm.
+    struct QItem {
+        rgc::Reassembler::Frame frame;
+        uint64_t enqUs = 0;
+    };
+    std::deque<QItem> decQueue;
     std::atomic<bool> decodeThreadStop{false};
     std::atomic<bool> decodeFailedFlag{false};   // Decode() lỗi -> xin IDR
     std::atomic<bool> queueOverflowFlag{false};  // đã bỏ frame vì đầy hàng đợi
+
+    // --- Chẩn đoán (docs/09), bộ đếm cửa sổ 1s ---
+    // Thread Decode ghi (atomic), thread Recv đọc-và-reset ở khối thống kê:
+    std::atomic<uint32_t> dgQMsSum{0}, dgQMsMax{0};     // t_queue: chờ trong hàng đợi
+    std::atomic<uint32_t> dgDecMsSum{0}, dgDecMsMax{0}; // t_dec: decode + render
+    std::atomic<uint32_t> dgDecCount{0};
+    // Chỉ thread Recv chạm (không cần atomic):
+    uint32_t dgAsmMsSum = 0, dgAsmMsMax = 0, dgAsmCount = 0; // t_asm: mảnh đầu → ghép xong
+    uint32_t dgDqDepthMax = 0, dgDqDrop = 0;                 // K2: hàng đợi decode
+    uint32_t dgLoopBusyMaxMs = 0;                            // K4: vòng Recv bận
+    uint64_t kfReqUs = 0; // K3: thời điểm bắt đầu xin keyframe; 0 = không treo
 
     auto onDecoded = [&](const DecodedFrame& df) {
         if (!s.rendererReady.load(std::memory_order_acquire)) return;
@@ -165,7 +189,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 
     std::thread decodeThread([&] {
         for (;;) {
-            rgc::Reassembler::Frame f;
+            QItem it;
             {
                 std::unique_lock<std::mutex> lk(decQueueMutex);
                 decQueueCv.wait(lk, [&] { return decodeThreadStop.load() || !decQueue.empty(); });
@@ -173,14 +197,35 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
                     if (decodeThreadStop.load()) return;
                     continue;
                 }
-                f = std::move(decQueue.front());
+                it = std::move(decQueue.front());
                 decQueue.pop_front();
             }
-            if (!decoder) continue; // không nên xảy ra: decoder tạo trước frame đầu
+            // Dựng decoder LƯỜI ở frame đầu, ngay trên thread này (xem chú thích ở
+            // khai báo `decoder`). Frame chỉ vào hàng đợi sau khi đàm phán xong nên
+            // decW/decH/decFps chắc chắn đã có giá trị.
+            if (!decoder) {
+                DecoderConfig dc;
+                dc.codec  = Codec::H264;
+                dc.width  = decW.load(std::memory_order_relaxed);
+                dc.height = decH.load(std::memory_order_relaxed);
+                dc.fps    = decFps.load(std::memory_order_relaxed);
+                decoder = CreateDecoder(device, dc, onDecoded);
+                if (!decoder) { s.failed.store(true); return; } // vòng Recv thấy failed
+            }
+            rgc::Reassembler::Frame& f = it.frame;
 
+            // K1: t_queue = nằm chờ trong hàng đợi, t_dec = decode + render. Hai số
+            // này tách "client đuối" khỏi "mạng chậm" khi mổ xẻ trễ e2e.
             const uint64_t decStartUs = NowUs();
+            const uint32_t qMs = uint32_t((decStartUs - it.enqUs) / 1000);
+            dgQMsSum.fetch_add(qMs, std::memory_order_relaxed);
+            DiagAtomicMax(dgQMsMax, qMs);
+
             const bool decodeOk = decoder->Decode(f.nal.data(), f.nal.size(), f.timestampUs);
             const uint64_t decMs = (NowUs() - decStartUs) / 1000;
+            dgDecMsSum.fetch_add(uint32_t(decMs), std::memory_order_relaxed);
+            DiagAtomicMax(dgDecMsMax, uint32_t(decMs));
+            dgDecCount.fetch_add(1, std::memory_order_relaxed);
             if (decMs > 20) {
                 std::printf("[Client][%s] WARNING: decode+render took %llu ms for one frame\n",
                             s.src.name.c_str(), (unsigned long long)decMs);
@@ -250,6 +295,31 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
                     if (!reasm) {
                         const uint32_t fps = session.params().fps ? session.params().fps : 60;
                         reasm = std::make_unique<rgc::Reassembler>(1'000'000 / fps);
+                        // Tham số cho thread Decode dựng decoder (ghi TRƯỚC khi bất
+                        // kỳ frame nào có thể vào hàng đợi).
+                        decW.store(session.params().width, std::memory_order_relaxed);
+                        decH.store(session.params().height, std::memory_order_relaxed);
+                        decFps.store(fps, std::memory_order_relaxed);
+                        // C1: bản khám nghiệm từng frame bị khai tử.
+                        reasm->onFrameDrop = [&s](const rgc::Reassembler::FrameDropInfo& d) {
+                            static const char* const kReason[] =
+                                {"timeout", "overtaken", "evicted", "pre_idr"};
+                            // Vị trí chùm thiếu: đuôi frame là dấu vân tay của
+                            // burst (docs/06 §7b) — nhìn pos= là biết ngay.
+                            const char* pos = "-";
+                            if (d.missing) {
+                                const bool head = d.firstMissing == 0;
+                                const bool tail = d.lastMissing + 1 == d.total;
+                                pos = head && tail ? "all" : tail ? "tail"
+                                                   : head ? "head" : "mid";
+                            }
+                            std::printf("[DIAG][%s] evt=frame_drop id=%u reason=%s"
+                                        " miss=%u/%u pos=%s idr=%u waited_ms=%u"
+                                        " got_bytes=%u\n",
+                                        s.src.name.c_str(), d.frameId,
+                                        kReason[size_t(d.reason)], d.missing, d.total,
+                                        pos, d.idr ? 1 : 0, d.waitedMs, d.bytesGot);
+                        };
                     }
                     if (h->type == rgc::MsgType::FecPacket) {
                         if (const auto v = rgc::ParseFecPacket(*h, pl)) {
@@ -268,18 +338,36 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
             }
         }
 
+        // K3: gom mọi đường dẫn tới "xin IDR" về một chỗ, kèm lý do và mốc thời
+        // gian — để log cho thấy vòng xoáy IDR (xin dồn dập, IDR về chậm) nếu có.
+        // Gọi lặp là vô hại: chỉ in ở lần chuyển từ "không treo" sang "đang treo".
+        auto requestKf = [&](const char* reason) {
+            if (!kfReqUs) {
+                kfReqUs = now;
+                std::printf("[DIAG][%s] evt=kf_req reason=%s\n", s.src.name.c_str(), reason);
+            }
+            session.RequestKeyframe();
+        };
+
         if (reasm) {
             while (auto f = reasm->PopReady(now)) {
-                if (!decoder) {
-                    DecoderConfig dc;
-                    dc.codec  = Codec::H264;
-                    dc.width  = session.params().width;
-                    dc.height = session.params().height;
-                    dc.fps    = session.params().fps;
-                    decoder = CreateDecoder(device, dc, onDecoded);
-                    if (!decoder) { s.failed.store(true); break; }
+                if (f->idr) {
+                    session.CancelKeyframeRequest();
+                    // K3: IDR đã về — bao lâu kể từ lúc bắt đầu xin?
+                    if (kfReqUs) {
+                        std::printf("[DIAG][%s] evt=idr_rx bytes=%zu after_ms=%llu\n",
+                                    s.src.name.c_str(), f->nal.size(),
+                                    (unsigned long long)((now - kfReqUs) / 1000));
+                        kfReqUs = 0;
+                    }
                 }
-                if (f->idr) session.CancelKeyframeRequest();
+                // K1: t_asm = mảnh đầu tiên tới → frame ghép xong và rời Reassembler.
+                if (f->firstSeenUs) {
+                    const uint32_t asmMs = uint32_t((now - f->firstSeenUs) / 1000);
+                    dgAsmMsSum += asmMs;
+                    ++dgAsmCount;
+                    if (asmMs > dgAsmMsMax) dgAsmMsMax = asmMs;
+                }
                 // Chỉ đẩy vào hàng đợi, không Decode() ở đây — giữ thread Recv luôn
                 // rảnh để quay lại recvfrom ngay.
                 {
@@ -287,16 +375,18 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
                     if (decQueue.size() >= kMaxQueuedFrames) {
                         decQueue.pop_front();
                         queueOverflowFlag.store(true, std::memory_order_release);
+                        ++dgDqDrop;
                     }
-                    decQueue.push_back(std::move(*f));
+                    decQueue.push_back(QItem{std::move(*f), now});
+                    if (decQueue.size() > dgDqDepthMax) dgDqDepthMax = uint32_t(decQueue.size());
                 }
                 decQueueCv.notify_one();
             }
-            if (reasm->TakeLossEvent() || reasm->WaitingForIdr())
-                session.RequestKeyframe();
+            if (reasm->TakeLossEvent()) requestKf("loss");
+            else if (reasm->WaitingForIdr()) requestKf("wait_idr");
         }
-        if (decodeFailedFlag.exchange(false, std::memory_order_acq_rel)) session.RequestKeyframe();
-        if (queueOverflowFlag.exchange(false, std::memory_order_acq_rel)) session.RequestKeyframe();
+        if (decodeFailedFlag.exchange(false, std::memory_order_acq_rel)) requestKf("dec_fail");
+        if (queueOverflowFlag.exchange(false, std::memory_order_acq_rel)) requestKf("q_overflow");
 
         // Vét input do luồng Main gom được -> ClientSession đánh seq, Tick gửi.
         {
@@ -342,8 +432,39 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
             // Số liệu đó gửi ngược cho host để nó siết/nới bitrate.
             session.SendFeedback(rgc::MakeFeedback(w, session.lastRttUs()));
 
+            // Dòng chẩn đoán 1s (K1/K2/K4 + late/gap từ core) — đọc-và-reset mọi bộ
+            // đếm cửa sổ. late= là con số phân xử "mất thật vs tới muộn" (docs/06 §7b).
+            {
+                const uint32_t dc = dgDecCount.exchange(0, std::memory_order_relaxed);
+                const uint32_t qs = dgQMsSum.exchange(0, std::memory_order_relaxed);
+                const uint32_t qm = dgQMsMax.exchange(0, std::memory_order_relaxed);
+                const uint32_t ds = dgDecMsSum.exchange(0, std::memory_order_relaxed);
+                const uint32_t dm = dgDecMsMax.exchange(0, std::memory_order_relaxed);
+                std::printf("[DIAG][%s] evt=sum asm_ms=%.1f/%u q_ms=%.1f/%u dec_ms=%.1f/%u"
+                            " dq_max=%u dq_drop=%u late=%llu late_ms_avg=%.0f late_ms_max=%llu"
+                            " gap_ms_max=%u loop_busy_ms_max=%u\n",
+                            s.src.name.c_str(),
+                            dgAsmCount ? double(dgAsmMsSum) / dgAsmCount : 0.0, dgAsmMsMax,
+                            dc ? double(qs) / dc : 0.0, qm,
+                            dc ? double(ds) / dc : 0.0, dm,
+                            dgDqDepthMax, dgDqDrop,
+                            (unsigned long long)w.latePackets, w.lateMsAvg,
+                            (unsigned long long)w.lateMsMax,
+                            reasm ? reasm->TakeMaxGapMs() : 0, dgLoopBusyMaxMs);
+                dgAsmMsSum = dgAsmMsMax = dgAsmCount = 0;
+                dgDqDepthMax = dgDqDrop = 0;
+                dgLoopBusyMaxMs = 0;
+            }
+
             stBytes = 0;
         }
+
+        // K4: vòng này bận bao lâu (từ lúc recvfrom trả về tới đây). Thread Recv
+        // nghẽn thì buffer UDP của kernel gánh — tràn là mất gói thật.
+        const uint32_t busyMs = uint32_t((NowUs() - now) / 1000);
+        if (busyMs > dgLoopBusyMaxMs) dgLoopBusyMaxMs = busyMs;
+        if (busyMs > 50)
+            std::printf("[DIAG][%s] evt=recv_stall busy_ms=%u\n", s.src.name.c_str(), busyMs);
     }
 
     // Dừng thread Decode trước khi decoder (biến cục bộ trên thread này) hủy.

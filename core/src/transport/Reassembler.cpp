@@ -41,7 +41,7 @@ Reassembler::Pending* Reassembler::Slot(uint32_t id, uint16_t pktCount,
     if (it == pending_.end()) {
         // Frame mới trong khi đã đầy chỗ: frame già nhất đang chặn hàng — bỏ nó.
         while (pending_.size() >= kMaxPendingFrames)
-            Drop(pending_.begin(), true);
+            Drop(pending_.begin(), DropReason::Evicted, nowUs);
         it = pending_.emplace(id, Pending{}).first;
         Pending& f = it->second;
         f.pktCount = pktCount;
@@ -58,7 +58,22 @@ Reassembler::Pending* Reassembler::Slot(uint32_t id, uint16_t pktCount,
 // tỉ lệ báo cáo cho host lệch đi.
 void Reassembler::Push(const VideoPacketView& pkt, uint64_t nowUs) {
     ++stats_.packetsReceived;
+
+    // Khoảng lặng giữa hai gói video liên tiếp — cảm biến "gói về đều hay về cục".
+    // Đo trên MỌI gói dữ liệu, kể cả trùng/muộn: cái ta quan tâm là nhịp đường
+    // truyền, không phải tính hợp lệ của gói.
+    if (lastPushUs_) {
+        const uint32_t gapMs = uint32_t((nowUs - lastPushUs_) / 1000);
+        if (gapMs > maxGapMs_) maxGapMs_ = gapMs;
+    }
+    lastPushUs_ = nowUs;
+
     if (pkt.payload.empty()) return; // Packetizer không bao giờ phát mảnh rỗng
+
+    // Gói của frame đã khai tử vì "mất gói" mà giờ mới về = KHÔNG mất, chỉ MUỘN.
+    // Ghi nhận trước khi Slot() chặn nó — số liệu này phân xử §7b của docs/06.
+    if (haveBarrier_ && pkt.hdr.frameId <= barrierId_)
+        NoteLatePacket(pkt.hdr.frameId, nowUs);
 
     Pending* fp = Slot(pkt.hdr.frameId, pkt.hdr.pktCount, pkt.hdr.timestampUs, nowUs);
     if (!fp) return;
@@ -155,7 +170,7 @@ std::optional<Reassembler::Frame> Reassembler::PopReady(uint64_t nowUs) {
 
         if (f.Complete()) {
             if (waitingForIdr_ && !f.idr) { // nuốt non-IDR khi chờ IDR
-                Drop(head, false);
+                Drop(head, DropReason::PreIdr, nowUs);
                 continue;
             }
             // Nối các mảnh theo đúng thứ tự pktIndex thành NAL Annex-B liền mạch —
@@ -165,6 +180,7 @@ std::optional<Reassembler::Frame> Reassembler::PopReady(uint64_t nowUs) {
             out.frameId     = head->first;
             out.timestampUs = f.timestampUs;
             out.idr         = f.idr;
+            out.firstSeenUs = f.firstSeenUs;
             out.nal.reserve(f.bytes);
             for (const auto& p : f.pieces)
                 out.nal.insert(out.nal.end(), p.begin(), p.end());
@@ -180,8 +196,12 @@ std::optional<Reassembler::Frame> Reassembler::PopReady(uint64_t nowUs) {
         size_t newerComplete = 0;
         for (auto n = std::next(head); n != pending_.end(); ++n)
             if (n->second.Complete()) ++newerComplete;
-        if (nowUs - f.firstSeenUs > 2 * frameIntervalUs_ || newerComplete >= 2) {
-            Drop(head, true);
+        if (nowUs - f.firstSeenUs > 2 * frameIntervalUs_) {
+            Drop(head, DropReason::Timeout, nowUs);
+            continue;
+        }
+        if (newerComplete >= 2) {
+            Drop(head, DropReason::Overtaken, nowUs);
             continue;
         }
         return std::nullopt; // còn hy vọng mảnh thiếu đang trên đường tới
@@ -195,24 +215,40 @@ bool Reassembler::TakeLossEvent() {
     return e;
 }
 
-// Bỏ một frame khỏi hàng chờ. `loss` phân biệt hai tình huống rất khác nhau:
-//   true  — frame thiếu mảnh vì MẤT GÓI THẬT. Tính vào thống kê mất mát, bật cờ
-//           xin keyframe, và chuyển sang trạng thái chờ IDR.
-//   false — frame LÀNH LẶN nhưng bị nuốt vì đang chờ IDR. Không phải lỗi đường
+// Bỏ một frame khỏi hàng chờ. `reason` phân biệt hai tình huống rất khác nhau:
+//   Timeout/Overtaken/Evicted — frame thiếu mảnh vì MẤT GÓI (hoặc gói chưa kịp
+//           tới). Tính vào thống kê mất mát, bật cờ xin keyframe, chuyển sang
+//           trạng thái chờ IDR, và chôn vào nghĩa địa để nhận diện gói về muộn.
+//   PreIdr — frame LÀNH LẶN nhưng bị nuốt vì đang chờ IDR. Không phải lỗi đường
 //           truyền, chỉ tính vào framesSkipped.
-// Dù theo đường nào, barrier vẫn được dời tới để gói lạc của frame này bị chặn.
-void Reassembler::Drop(PendingMap::iterator it, bool loss) {
+// Dù theo đường nào, barrier vẫn được dời tới để gói lạc của frame này bị chặn,
+// và onFrameDrop (nếu client gắn) nhận được bản khám nghiệm.
+void Reassembler::Drop(PendingMap::iterator it, DropReason reason, uint64_t nowUs) {
+    const Pending& f = it->second;
+    const bool loss = reason != DropReason::PreIdr;
+
+    FrameDropInfo info;
+    info.frameId  = it->first;
+    info.reason   = reason;
+    info.total    = f.pktCount;
+    info.idr      = f.idr;
+    info.waitedMs = uint32_t((nowUs - f.firstSeenUs) / 1000);
+    info.bytesGot = uint32_t(f.bytes);
+
     if (loss) {
         ++stats_.framesDropped;
         stats_.packetsLost += uint64_t(it->second.pktCount - it->second.received);
 
-        // Đếm chùm mất liên tiếp (xem Stats::lossRuns). Chỉ chạy trên frame BỎ ĐI nên
-        // không nằm trên đường nóng.
-        const Pending& f = it->second;
+        // Đếm chùm mất liên tiếp (xem Stats::lossRuns) và vị trí chùm thiếu cho bản
+        // khám nghiệm. Chỉ chạy trên frame BỎ ĐI nên không nằm trên đường nóng.
         size_t run = 0;
+        bool anyMissing = false;
         for (size_t i = 0; i <= f.pktCount; ++i) {
             const bool gone = i < f.pktCount && f.pieces[i].empty();
             if (gone) {
+                ++info.missing;
+                if (!anyMissing) { anyMissing = true; info.firstMissing = uint16_t(i); }
+                info.lastMissing = uint16_t(i);
                 ++run;
             } else if (run) {
                 size_t b = 0;
@@ -227,6 +263,11 @@ void Reassembler::Drop(PendingMap::iterator it, bool loss) {
             }
         }
 
+        // Chôn vào nghĩa địa (ghi đè entry cũ nhất): gói của frame này còn lết về
+        // sau sẽ được NoteLatePacket nhận diện là "muộn" thay vì "mất".
+        graveyard_[graveNext_] = Grave{it->first, nowUs};
+        graveNext_ = (graveNext_ + 1) % kGraveyardSize;
+
         lossEvent_ = true;
         ++stats_.lossEvents;
         waitingForIdr_ = true; // frame sau tham chiếu frame vừa mất → phải chờ IDR
@@ -238,6 +279,22 @@ void Reassembler::Drop(PendingMap::iterator it, bool loss) {
         barrierId_   = it->first;
     }
     pending_.erase(it);
+
+    if (onFrameDrop) onFrameDrop(info);
+}
+
+// Gói dữ liệu mang frameId ≤ barrier — nếu frame đó nằm trong nghĩa địa (bị khai
+// tử vì "mất gói") thì đây là bằng chứng nó KHÔNG mất mà chỉ MUỘN. Quét tuyến tính
+// 16 entry, chỉ chạy trên gói muộn (hiếm) nên không đáng kể.
+void Reassembler::NoteLatePacket(uint32_t id, uint64_t nowUs) {
+    for (const Grave& g : graveyard_) {
+        if (g.dropUs == 0 || g.frameId != id) continue;
+        ++stats_.latePackets;
+        const uint64_t lateMs = (nowUs - g.dropUs) / 1000;
+        stats_.lateMsSum += lateMs;
+        if (lateMs > stats_.lateMsMax) stats_.lateMsMax = lateMs;
+        return;
+    }
 }
 
 } // namespace rgc

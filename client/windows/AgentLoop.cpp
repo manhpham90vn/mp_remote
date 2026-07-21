@@ -60,6 +60,7 @@
 #include "rgcp/Clock.h"
 #include "net/UdpSocket.h"
 #include "capture/WindowCapture.h"
+#include "Diag.h"
 
 #include "rgc/control/BitrateController.h"
 #include "rgc/session/HostSession.h"
@@ -130,6 +131,7 @@ struct SourcePipeline {
     Microsoft::WRL::ComPtr<ID3D11Texture2D> cachedTex;
     std::atomic<bool>     haveCached{false};
     std::atomic<uint64_t> lastFrameUs{0};
+    uint64_t lastKeepaliveUs = 0; // lần bơm lại frame cache gần nhất — chỉ thread Recv chạm
 
     // --- Congestion control, chỉ thread Recv chạm ---
     // Policy thuần ở core; curBitrateBps/wantFec ở trên là bản sao atomic cho thread
@@ -139,6 +141,28 @@ struct SourcePipeline {
     // --- Thống kê cửa sổ 1s, chỉ thread Recv chạm ---
     uint32_t lastCaptured = 0;
     uint64_t lastBytes = 0, lastFrames = 0;
+
+    // --- Chẩn đoán (docs/09): bộ đếm cửa sổ 1s. Ghi từ thread FrameArrived (và
+    // thread Recv lúc encode lại frame tĩnh), đọc-và-reset ở khối thống kê 1s. ---
+    std::atomic<uint32_t> dgEncMsSum{0}, dgEncMsMax{0}, dgEncCount{0};
+    std::atomic<uint32_t> dgBurstMsMax{0}; // thời gian bắn hết gói của MỘT frame
+    std::atomic<uint32_t> dgSendFail{0};   // sendto trả lỗi (buffer gửi đầy...)
+    std::atomic<uint32_t> dgIdrCount{0};
+    // Sự kiện IDR gần nhất — thread FrameArrived ghi, thread Recv in (giữ I/O
+    // ngoài đường nóng, bài học Pacer ở docs/06 §7b). bytes==0 = không có sự kiện;
+    // ghi bytes CUỐI CÙNG với release để hai trường kia nhìn thấy trước nó.
+    std::atomic<uint64_t> dgIdrBytes{0};
+    std::atomic<uint32_t> dgIdrPkts{0}, dgIdrBurstMs{0};
+
+    // Đo thời gian một lần Encode + cộng vào bộ đếm cửa sổ. Gọi từ CẢ HAI thread.
+    void DiagEncode(IVideoEncoder* enc, ID3D11Texture2D* tex, bool idr) {
+        const uint64_t t0 = NowUs();
+        enc->Encode(tex, t0, idr);
+        const uint32_t ms = uint32_t((NowUs() - t0) / 1000);
+        dgEncMsSum.fetch_add(ms, std::memory_order_relaxed);
+        dgEncCount.fetch_add(1, std::memory_order_relaxed);
+        DiagAtomicMax(dgEncMsMax, ms);
+    }
 };
 
 } // namespace
@@ -218,13 +242,29 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             // Packetizer là single-thread (thread này). Thread Recv chỉ đặt ý muốn
             // qua atomic, việc bật/tắt thật diễn ra ở đây — khỏi cần khóa.
             p->packetizer.SetFecEnabled(p->wantFec.load(std::memory_order_relaxed));
+            // Đo burst gửi (H2): từ gói đầu tới gói cuối của frame này, và bắt lỗi
+            // sendto — trước đây trị trả về bị vứt, buffer gửi đầy là mất gói ngay
+            // tại host mà không ai hay.
+            const uint64_t sendT0 = NowUs();
             const size_t pkts = p->packetizer.SendFrame(
                 std::span<const uint8_t>(data, size), p->nextFrameId++, tsUs, keyframe,
                 [p, &sock, &peer](std::span<const uint8_t> d) {
-                    sock.SendTo(peer, d.data(), d.size());
-                    p->bytesSent.fetch_add(d.size(), std::memory_order_relaxed);
+                    if (sock.SendTo(peer, d.data(), d.size()))
+                        p->bytesSent.fetch_add(d.size(), std::memory_order_relaxed);
+                    else
+                        p->dgSendFail.fetch_add(1, std::memory_order_relaxed);
                 });
+            const uint32_t burstMs = uint32_t((NowUs() - sendT0) / 1000);
+            DiagAtomicMax(p->dgBurstMsMax, burstMs);
             if (pkts) p->framesSent.fetch_add(1, std::memory_order_relaxed);
+            // Sự kiện IDR (H1): ghi lại cho thread Recv in — cỡ IDR là con số quyết
+            // định chẩn đoán chùm mất gói (docs/06 §7b).
+            if (pkts && keyframe) {
+                p->dgIdrCount.fetch_add(1, std::memory_order_relaxed);
+                p->dgIdrPkts.store(uint32_t(pkts), std::memory_order_relaxed);
+                p->dgIdrBurstMs.store(burstMs, std::memory_order_relaxed);
+                p->dgIdrBytes.store(uint64_t(size), std::memory_order_release);
+            }
         };
 
         // Tạo encoder nếu chưa có. GỌI DƯỚI encMutex. false = backend không dùng được.
@@ -316,8 +356,9 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             if (!p->netReady.load(std::memory_order_acquire)) return;
             if (!ensureEncoder(encW, encH, fi.width, fi.height)) return;
             // Encode liên tục kể cả khi chưa có client (đơn giản, VBV ổn định);
-            // NAL bị bỏ ở onPacket nếu chưa STREAMING.
-            p->encoder->Encode(fi.texture, NowUs(), p->forceIdr.exchange(false));
+            // NAL bị bỏ ở onPacket nếu chưa STREAMING. DiagEncode = Encode + đo
+            // thời gian cho cửa sổ chẩn đoán (H1).
+            p->DiagEncode(p->encoder.get(), fi.texture, p->forceIdr.exchange(false));
         };
 
         if (!p->capture.Start(p->target, gpu.device.Get(), onFrame)) {
@@ -455,6 +496,10 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
     uint8_t buf[rgc::kMaxDatagram];
     uint64_t lastStatUs = NowUs();
     bool anyFailed = false;
+    // H3: thời gian BẬN dài nhất của một vòng Recv trong cửa sổ 1s (không tính lúc
+    // chờ recvfrom). Vòng này mà nghẽn thì buffer UDP của kernel gánh — tràn là mất
+    // gói thật. Chỉ thread Recv chạm nên không cần atomic.
+    uint32_t dgLoopBusyMaxMs = 0;
 
     for (;;) {
         if (g_ctrlC.load()) break;
@@ -516,6 +561,16 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             if (p->failed.load()) continue;
             p->session->Tick(now);
 
+            // Sự kiện IDR do thread FrameArrived ghi lại (H1) — in ở đây để I/O
+            // không nằm trên đường nóng. Luôn bật: IDR hiếm và cỡ của nó là con số
+            // chẩn đoán quan trọng nhất phía host.
+            if (const uint64_t ib = p->dgIdrBytes.exchange(0, std::memory_order_acquire)) {
+                std::printf("[DIAG][%s] evt=idr bytes=%llu pkts=%u burst_ms=%u\n",
+                            p->name.c_str(), (unsigned long long)ib,
+                            p->dgIdrPkts.load(std::memory_order_relaxed),
+                            p->dgIdrBurstMs.load(std::memory_order_relaxed));
+            }
+
             // Nguồn vừa đổi kích thước (thread FrameArrived đã dựng lại encoder).
             // Báo client kích thước mới + IDR: stream đổi SPS giữa chừng, không có
             // IDR thì decoder client chỉ có rác cho tới keyframe kế tiếp.
@@ -534,16 +589,29 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                 }
             }
 
-            // Yêu cầu IDR đang treo mà nguồn đang TĨNH (>200ms không có FrameArrived
-            // — WGC chỉ phát khi nội dung đổi) -> encode lại frame cache để có hình.
+            // Nguồn đang TĨNH (WGC chỉ phát frame khi nội dung đổi) — encoder không
+            // có input mới. Hai nhu cầu gộp chung một chỗ:
+            //   1. Yêu cầu IDR đang treo (>200ms không FrameArrived) → encode lại
+            //      frame cache với IDR, không thì client join màn hình tĩnh đen mãi.
+            //   2. KEEPALIVE ~2fps: MFT async (QSV) NGẬM output tới khi có input kế
+            //      tiếp — nguồn đứng im là frame cuối kẹt trong encoder với timestamp
+            //      cũ, client thấy nội dung trễ một nhịp và e2e ảo tới hàng chục giây
+            //      (đo 2026-07-21). Bơm lại frame cache để đẩy nó ra; nội dung không
+            //      đổi nên P-frame chỉ vài KB, chi phí không đáng kể.
+            const uint64_t sinceFrameUs = now - p->lastFrameUs.load(std::memory_order_relaxed);
+            const bool wantIdrFlush  = p->forceIdr.load() && sinceFrameUs > 200'000;
+            const bool wantKeepalive = sinceFrameUs > 500'000 &&
+                                       now - p->lastKeepaliveUs >= 500'000;
             if (p->session->state() == rgc::HostSession::State::Streaming &&
-                p->forceIdr.load() && p->haveCached.load(std::memory_order_acquire) &&
-                now - p->lastFrameUs.load(std::memory_order_relaxed) > 200'000) {
+                p->haveCached.load(std::memory_order_acquire) &&
+                (wantIdrFlush || wantKeepalive)) {
                 std::lock_guard<std::mutex> lk(p->encMutex);
                 if (p->ensureEncoderFn(p->srcW.load(), p->srcH.load(),
-                                       p->srcTexW.load(), p->srcTexH.load()) &&
-                    p->forceIdr.exchange(false))
-                    p->encoder->Encode(p->cachedTex.Get(), NowUs(), true);
+                                       p->srcTexW.load(), p->srcTexH.load())) {
+                    p->DiagEncode(p->encoder.get(), p->cachedTex.Get(),
+                                  p->forceIdr.exchange(false));
+                    p->lastKeepaliveUs = now;
+                }
             }
         }
 
@@ -565,9 +633,33 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                 p->lastCaptured = cap;
                 p->lastBytes = by;
                 p->lastFrames = fr;
+
+                // Dòng chẩn đoán 1s của nguồn này (H1+H2): đọc-và-reset bộ đếm
+                // cửa sổ.
+                {
+                    const uint32_t ec = p->dgEncCount.exchange(0, std::memory_order_relaxed);
+                    const uint32_t es = p->dgEncMsSum.exchange(0, std::memory_order_relaxed);
+                    const uint32_t em = p->dgEncMsMax.exchange(0, std::memory_order_relaxed);
+                    std::printf("[DIAG][%s] evt=sum enc_ms_avg=%.1f enc_ms_max=%u idr=%u"
+                                " burst_ms_max=%u send_fail=%u\n",
+                                p->name.c_str(), ec ? double(es) / ec : 0.0, em,
+                                p->dgIdrCount.exchange(0, std::memory_order_relaxed),
+                                p->dgBurstMsMax.exchange(0, std::memory_order_relaxed),
+                                p->dgSendFail.exchange(0, std::memory_order_relaxed));
+                }
             }
+            // Sức khỏe thread Recv (H3), chung cho mọi nguồn.
+            std::printf("[DIAG][agent] evt=sum loop_busy_ms_max=%u\n", dgLoopBusyMaxMs);
+            dgLoopBusyMaxMs = 0;
             lastStatUs = now;
         }
+
+        // H3: vòng này bận bao lâu (từ lúc recvfrom trả về tới đây). Nghẽn nặng thì
+        // báo ngay, không đợi cửa sổ 1s.
+        const uint32_t busyMs = uint32_t((NowUs() - now) / 1000);
+        if (busyMs > dgLoopBusyMaxMs) dgLoopBusyMaxMs = busyMs;
+        if (busyMs > 250)
+            std::printf("[DIAG][agent] evt=recv_stall busy_ms=%u\n", busyMs);
     }
 
     // --- Dọn dẹp ---

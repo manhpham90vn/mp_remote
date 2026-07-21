@@ -137,6 +137,11 @@ private:
     std::atomic<bool>     queueOverflow_{false};
     std::atomic<uint32_t> stRendered_{0};
 
+    // --- Chẩn đoán (docs/09): t_dec của cửa sổ 1s. Thread Decode ghi, thread Net
+    // đọc-và-reset. Max ghi kiểu load/store (một writer duy nhất là Decode) — đua
+    // với lần reset cùng lắm rơi một mẫu, chấp nhận được cho số liệu chẩn đoán. ---
+    std::atomic<uint32_t> dgDecMsSum_{0}, dgDecMsMax_{0}, dgDecCount_{0};
+
     // Ước lượng trễ e2e (docs/06 §7): Net ghi, Decode đọc.
     std::atomic<int64_t>  ackDeltaUs_{0};
     std::atomic<uint32_t> minRttUs_{0};

@@ -39,6 +39,12 @@ LinkWindow LinkStats::Close(const Reassembler::Stats& cur, uint64_t videoBytes,
     }
     w.lossRunMax = cur.lossRunMax;
 
+    // Gói về muộn: đếm theo cửa sổ, độ muộn trung bình tính trên đúng cửa sổ này.
+    w.latePackets = cur.latePackets - prev_.latePackets;
+    const uint64_t lateMsInWin = cur.lateMsSum - prev_.lateMsSum;
+    w.lateMsAvg = w.latePackets ? double(lateMsInWin) / double(w.latePackets) : 0.0;
+    w.lateMsMax = cur.lateMsMax;
+
     // Mẫu số là số gói LẼ RA phải nhận = nhận được + mất. Bảo vệ phép chia cho 0:
     // giây đầu tiên sau khi kết nối thường chưa có gói video nào.
     const uint64_t seen = w.packetsReceived + w.packetsLost;

@@ -57,6 +57,12 @@ struct LinkWindow {
     uint64_t lossRuns[7]  = {};
     uint64_t lossRunTotal = 0; // tổng số chùm — 0 nghĩa là giây vừa rồi không mất gói
     uint64_t lossRunMax   = 0; // chùm dài nhất TỪNG thấy (tích luỹ, không phải delta)
+
+    // Gói "về muộn" trong cửa sổ (xem Reassembler::Stats::latePackets): gói của
+    // frame đã khai tử mà còn lết về. lateMsAvg tính trên cửa sổ; lateMsMax tích luỹ.
+    uint64_t latePackets = 0;
+    double   lateMsAvg   = 0.0;
+    uint64_t lateMsMax   = 0;
 };
 
 class LinkStats {

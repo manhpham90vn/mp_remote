@@ -42,6 +42,7 @@ cmake --preset x64-debug && cmake --build --preset x64-debug
 | [06-phase3-transport.md](06-phase3-transport.md) | Thiết kế chi tiết GĐ3 (transport) |
 | [07-phase4-input.md](07-phase4-input.md) | Thiết kế chi tiết GĐ4 (input) |
 | [08-android-client.md](08-android-client.md) | Client Android (NDK, view-only) |
+| [09-diagnostics.md](09-diagnostics.md) | Log chẩn đoán điểm nghẽn (`[DIAG]`, luôn bật) |
 
 ## Trạng thái
 

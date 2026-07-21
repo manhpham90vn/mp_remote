@@ -342,6 +342,13 @@ struct MfEncoder::Impl {
         setBool(CODECAPI_AVEncCommonLowLatency, true);
         setBool(CODECAPI_AVLowLatencyMode, true);
         setUI4(CODECAPI_AVEncMPVGOPSize, 0x7fffffff);  // ~vô hạn, IDR theo yêu cầu
+        // VBV ~2 frame (đơn vị BIT): trần cho cú dồn của một frame. Không có nó,
+        // QSV đẻ IDR ~196 KB — gấp ~5 lần ngân sách frame @20Mbps/60fps (đo
+        // 2026-07-21) — thành chùm 160+ gói, đúng thủ phạm burst-loss trên Wi-Fi
+        // (docs/06 §7b). NVENC đã bị ép VBV 1 frame từ trước (NvencEncoder.cpp:148);
+        // QSV cho 2 frame để IDR còn chỗ thở, chất lượng đỡ sụt ở cảnh động.
+        const ULONG frameBits = (ULONG)(cfg.bitrateBps / (cfg.fps ? cfg.fps : 60));
+        setUI4(CODECAPI_AVEncCommonBufferSize, frameBits * 2);
         return true;
     }
 
