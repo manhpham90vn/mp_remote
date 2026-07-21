@@ -20,6 +20,11 @@ inline constexpr uint64_t kHelloRetryUs    = 500'000;    // phát lại HELLO/ST
 inline constexpr uint64_t kHelloGiveUpUs   = 10'000'000; // bỏ cuộc nếu host im lặng
 inline constexpr uint64_t kPingIntervalUs  = 1'000'000;
 inline constexpr uint64_t kKeyframeRetryUs = 250'000;
+// SET_FOCUS gửi theo BIẾN CỐ (đổi cửa sổ), không gửi định kỳ: phát lại đều đặn thì
+// người ngồi ở máy host không bao giờ bấm sang được ứng dụng khác của chính mình.
+// Đổi lại phải chịu mất gói → phát kFocusRepeats lần cách kFocusRetryUs cho chắc.
+inline constexpr uint64_t kFocusRetryUs = 50'000;
+inline constexpr int      kFocusRepeats = 3;
 
 struct NegotiatedParams {
     Codec    codec = Codec::H264;
@@ -63,6 +68,11 @@ public:
     // Tick lo việc đóng gói, đánh seq và gửi lặp chống kẹt phím.
     void QueueInput(const InputEvent& e);
 
+    // Người dùng vừa chuyển sang (true) / rời khỏi (false) cửa sổ preview của nguồn
+    // này → host đưa cửa sổ nguồn lên foreground, vì SendInput chỉ tới cửa sổ đang
+    // foreground. Tick lo việc phát và phát lại; gọi lặp cùng giá trị là vô hại.
+    void SetFocused(bool on);
+
     // Giữ cờ xin IDR: Tick phát REQUEST_KEYFRAME mỗi 250ms tới khi Cancel.
     void RequestKeyframe() { keyframeWanted_ = true; }
     void CancelKeyframeRequest() { keyframeWanted_ = false; }
@@ -96,6 +106,10 @@ private:
     uint64_t lastRecvUs_ = 0;
     uint64_t lastPingUs_ = 0;
     uint64_t lastKeyframeReqUs_ = 0;
+    uint64_t lastFocusUs_ = 0;
+    int      focusRepeatsLeft_ = 0;
+    bool     focusWanted_ = false;  // giá trị đang phát lại
+    bool     focusSent_ = false;    // giá trị host đã biết — khỏi phát lại thừa
     uint32_t nextPingId_ = 1;
     uint32_t lastRttUs_ = 0;
     bool     keyframeWanted_ = false;

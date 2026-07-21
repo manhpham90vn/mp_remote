@@ -39,6 +39,11 @@ public:
     // chia sẻ, mà ở đây cả màn hình đã được chia sẻ nên không có "ứng dụng khác".
     bool InitMonitor(HMONITOR monitor);
 
+    // Kéo cửa sổ đích lên foreground (client vừa chuyển sang xem nguồn này —
+    // SET_FOCUS). Không làm gì và trả true nếu nguồn là cả màn hình, hoặc nếu cửa
+    // sổ vốn đã foreground. Trả false khi Windows từ chối.
+    bool FocusTarget();
+
     // Bơm một event. Bỏ qua nếu đang tắt hoặc cửa sổ đích đã đóng.
     void Apply(const rgc::InputEvent& e);
 

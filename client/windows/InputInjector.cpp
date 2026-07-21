@@ -79,6 +79,15 @@ bool InputInjector::InitMonitor(HMONITOR monitor) {
     return true;
 }
 
+bool InputInjector::FocusTarget() {
+    // Cả màn hình đã được chia sẻ trọn vẹn -> không có cửa sổ riêng nào để kéo lên.
+    if (monitor_) return true;
+    if (!target_ || !IsWindow(target_)) return false;
+    const HWND fg = GetForegroundWindow();
+    if (fg && (fg == target_ || GetAncestor(fg, GA_ROOT) == target_)) return true;
+    return ForceForeground(target_);
+}
+
 void InputInjector::SetEnabled(bool on) {
     if (enabled_ == on) return;
     if (!on) ReleaseAll(); // tắt giữa chừng không được để kẹt phím

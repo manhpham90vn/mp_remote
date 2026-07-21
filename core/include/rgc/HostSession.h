@@ -39,6 +39,12 @@ struct HostCallbacks {
     // LƯU Ý: onDisconnect phải nhả hết phím/nút đang giữ — mất kết nối giữa lúc
     // giữ phím mà không nhả sẽ kẹt phím ở máy host.
     std::function<void(const InputEvent&)> onInput;
+    // SET_FOCUS: client vừa chuyển sang (true) hoặc rời khỏi (false) nguồn này.
+    // Chỉ MỘT cửa sổ trên host được foreground tại một thời điểm, mà SendInput bơm
+    // vào cửa sổ foreground — nên client xem nhiều nguồn cùng lúc chỉ điều khiển
+    // được nguồn nào host đang để foreground. Caller kéo cửa sổ nguồn lên trước khi
+    // true, nhả phím đang giữ khi false.
+    std::function<void(bool focused)> onFocus;
 };
 
 class HostSession {

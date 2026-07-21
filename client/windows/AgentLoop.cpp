@@ -329,6 +329,21 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         };
         cb.onKeyframeRequest = [p] { p->forceIdr.store(true); };
         cb.onInput = [p](const rgc::InputEvent& e) { p->injector.Apply(e); };
+        // Client chuyển cửa sổ preview -> kéo đúng cửa sổ nguồn đó lên foreground.
+        // Chia sẻ nhiều nguồn thì chỉ một cửa sổ được foreground, mà SendInput bơm
+        // vào cửa sổ foreground; không có bước này thì client xem N nguồn nhưng chỉ
+        // điều khiển được nguồn nào người ở máy host tự bấm vào.
+        // Gác bằng enabled(): không cho điều khiển thì cũng không cho giành foreground.
+        cb.onFocus = [p](bool focused) {
+            if (!p->injector.enabled()) return;
+            if (!focused) {
+                p->injector.ReleaseAll(); // client rời đi giữa lúc giữ phím
+                return;
+            }
+            if (!p->injector.FocusTarget())
+                std::printf("[Agent][%s] Windows refused to bring this window to the front — "
+                            "click it once on this machine.\n", p->name.c_str());
+        };
         cb.onDisconnect = [p] {
             p->peerPacked.store(0, std::memory_order_release);
             p->injector.ReleaseAll(); // mất kết nối giữa lúc giữ phím = kẹt phím

@@ -53,6 +53,7 @@ enum class MsgType : uint8_t {
     Feedback        = 0x32,
     RequestKeyframe = 0x33,
     Reconfig        = 0x34,
+    SetFocus        = 0x35, // GĐ6: client báo cửa sổ preview của nguồn này vừa được focus
 };
 
 // Flags của VIDEO_PACKET
@@ -200,6 +201,9 @@ size_t BuildPong(std::span<uint8_t> out, uint32_t sessionId, const PingPong& m);
 size_t BuildFeedback(std::span<uint8_t> out, uint32_t sessionId, const Feedback& m);
 size_t BuildRequestKeyframe(std::span<uint8_t> out, uint32_t sessionId);
 size_t BuildReconfig(std::span<uint8_t> out, uint32_t sessionId, const Reconfig& m);
+// `focused` = 1: người dùng vừa chuyển sang xem/điều khiển nguồn này → host đưa cửa
+// sổ nguồn lên foreground. = 0: rời đi → host nhả hết phím đang giữ của phiên này.
+size_t BuildSetFocus(std::span<uint8_t> out, uint32_t sessionId, bool focused);
 size_t BuildVideoPacket(std::span<uint8_t> out, uint32_t sessionId, const VideoHeader& vh,
                         bool idr, bool frameEnd, std::span<const uint8_t> payload);
 // `parity` gồm cả 2 byte lenXor đứng đầu (xem FecPacketView).
@@ -222,6 +226,8 @@ std::optional<HelloAck> ParseHelloAck(std::span<const uint8_t> payload);
 std::optional<PingPong> ParsePingPong(std::span<const uint8_t> payload);
 std::optional<Feedback> ParseFeedback(std::span<const uint8_t> payload);
 std::optional<Reconfig> ParseReconfig(std::span<const uint8_t> payload);
+// true = xin focus, false = nhả. nullopt nếu payload rỗng.
+std::optional<bool> ParseSetFocus(std::span<const uint8_t> payload);
 std::optional<VideoPacketView> ParseVideoPacket(const CommonHeader& h,
                                                 std::span<const uint8_t> payload);
 std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,

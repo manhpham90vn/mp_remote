@@ -71,6 +71,12 @@ struct ClientStream {
     std::mutex inputMutex;
     std::vector<rgc::InputEvent> inputQueue;
 
+    // Cửa sổ preview của nguồn này có đang là cửa sổ nhận input không: đặt ở luồng
+    // Main, luồng Recv soi mỗi vòng và báo host (SET_FOCUS) để host kéo cửa sổ nguồn
+    // tương ứng lên foreground. ClientSession::SetFocused tự lọc trùng nên gọi mỗi
+    // vòng là vô hại — khỏi phải bắt cạnh lên/xuống qua thread.
+    std::atomic<bool> hasFocus{false};
+
     // Dòng số liệu cho overlay: ghi từ luồng Recv, đọc từ luồng Main.
     std::mutex   statsMutex;
     std::wstring statusText;
@@ -257,6 +263,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
             for (const auto& e : batch) session.QueueInput(e);
         }
 
+        session.SetFocused(s.hasFocus.load(std::memory_order_relaxed));
         session.Tick(now);
         if (session.state() == rgc::ClientSession::State::Dead) break;
 
@@ -411,6 +418,7 @@ int RunClient(const ClientOptions& opt) {
     auto attachInputTo = [&](ClientStream* s) {
         if (inputOwner == s) return;
         input.Detach();
+        if (inputOwner) inputOwner->hasFocus.store(false, std::memory_order_relaxed);
         inputOwner = nullptr;
         if (!s || !opt.sendInput) return;
         if (!input.Attach(s->renderer.Hwnd(), [s](const rgc::InputEvent& e) {
@@ -421,6 +429,9 @@ int RunClient(const ClientOptions& opt) {
         }
         input.SetEnabled(true);
         inputOwner = s;
+        // Luồng Recv của nguồn này sẽ gửi SET_FOCUS -> host đưa cửa sổ nguồn lên
+        // foreground, nếu không thì input bơm ở host rơi vào cửa sổ khác.
+        s->hasFocus.store(true, std::memory_order_relaxed);
         std::printf("[Client] Input now goes to \"%s\".\n", s->src.name.c_str());
     };
 

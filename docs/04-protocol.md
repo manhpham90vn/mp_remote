@@ -55,6 +55,7 @@ Sau header 8 byte là payload tùy `Type`.
 | 0x32 | FEEDBACK | control | C→A | không (định kỳ) |
 | 0x33 | REQUEST_KEYFRAME | control | C→A | có (retry) |
 | 0x34 | RECONFIG | control | A→C | có |
+| 0x35 | SET_FOCUS | control | C→A | phát lặp 3× |
 
 ## 3b. Nhiều nguồn trên một host (GĐ6)
 
@@ -288,6 +289,27 @@ processor theo kích thước frame giải mã — không bên nào cần dựng
 **Kích thước nén luôn là số chẵn.** NV12 lấy mẫu chroma 2×2; cửa sổ rộng/cao lẻ được cắt
 xuống số chẵn gần nhất, không thì `CreateTexture2D(NV12)` trả `E_INVALIDARG`. Số trong
 RECONFIG/HELLO_ACK là kích thước **đã cắt**, tức là cái thật sự nằm trong stream.
+
+### SET_FOCUS (0x35) — client chuyển sang điều khiển nguồn này
+| Trường | Kiểu | Ý nghĩa |
+|--------|------|---------|
+| focused | u8 | 1 = cửa sổ preview của nguồn này vừa nhận focus; 0 = vừa mất. |
+
+Chia sẻ nhiều nguồn thì host chỉ để **một** cửa sổ ở foreground được, mà `SendInput` bơm
+vào cửa sổ foreground chứ không vào một HWND cụ thể (`07-phase4-input.md` §5) — nên nếu
+không có message này, client mở N cửa sổ preview nhưng chỉ điều khiển được đúng cái mà
+người ngồi ở máy host tình cờ bấm vào. Client đổi cửa sổ preview → gửi SET_FOCUS(1) →
+host gọi `InputInjector::FocusTarget()` (chính là `ForceForeground` mà `Init` đang dùng).
+SET_FOCUS(0) → host nhả hết phím đang giữ của phiên đó.
+
+Host **chỉ nghe SET_FOCUS khi đã bật cho phép điều khiển** (`--input`): không cho điều
+khiển thì cũng không cho giành foreground của máy chủ.
+
+Gửi **theo biến cố, không định kỳ**. Phát lại đều đặn thì người ngồi ở máy host không
+bao giờ bấm sang được ứng dụng của chính mình — đổi lại phải chịu mất gói, nên mỗi lần
+đổi phát 3 lần cách nhau 50 ms. Host xử lý idempotent (đã foreground thì không làm gì).
+SET_FOCUS đi **trước** INPUT_EVENT trong cùng chu kỳ Tick, không thì mấy phím đầu tiên
+sau khi đổi cửa sổ bị host bỏ vì cửa sổ chưa kịp lên trước.
 
 ## 8. Máy trạng thái phiên
 

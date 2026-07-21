@@ -58,6 +58,13 @@ bool HostSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
         lastRecvUs_ = nowUs;
         input_.HandlePacket(payload, cb_.onInput);
         return true;
+    case MsgType::SetFocus: {
+        if (state() != State::Streaming || h->sessionId != sessionId()) return false;
+        lastRecvUs_ = nowUs;
+        const auto focused = ParseSetFocus(payload);
+        if (focused && cb_.onFocus) cb_.onFocus(*focused);
+        return true;
+    }
     case MsgType::Feedback: {
         if (state() == State::Idle || h->sessionId != sessionId()) return false;
         lastRecvUs_ = nowUs;

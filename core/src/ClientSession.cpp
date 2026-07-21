@@ -86,6 +86,13 @@ void ClientSession::QueueInput(const InputEvent& e) {
     input_.Queue(e);
 }
 
+void ClientSession::SetFocused(bool on) {
+    if (focusWanted_ == on && focusSent_ == on) return; // host đã biết rồi
+    focusWanted_ = on;
+    focusRepeatsLeft_ = kFocusRepeats;
+    lastFocusUs_ = 0; // phát ngay ở Tick kế tiếp, không đợi hết chu kỳ
+}
+
 void ClientSession::Tick(uint64_t nowUs) {
     switch (state_) {
     case State::Idle:
@@ -108,6 +115,17 @@ void ClientSession::Tick(uint64_t nowUs) {
         lastPingUs_ = nowUs;
         PingPong p{nextPingId_++, nowUs};
         const size_t n = BuildPing(buf_, sessionId_, p);
+        if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
+    }
+
+    // SET_FOCUS đi TRƯỚC input: host chỉ bơm khi cửa sổ nguồn đang foreground, gửi
+    // sau thì những phím đầu tiên sau khi đổi cửa sổ rơi vào khoảng trống.
+    if (state_ == State::Streaming && focusRepeatsLeft_ > 0 &&
+        nowUs - lastFocusUs_ >= kFocusRetryUs) {
+        lastFocusUs_ = nowUs;
+        --focusRepeatsLeft_;
+        focusSent_ = focusWanted_;
+        const size_t n = BuildSetFocus(buf_, sessionId_, focusWanted_);
         if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
     }
 

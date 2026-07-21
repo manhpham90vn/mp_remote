@@ -137,6 +137,13 @@ size_t BuildRequestKeyframe(std::span<uint8_t> out, uint32_t sessionId) {
     return BuildEmpty(out, MsgType::RequestKeyframe, sessionId);
 }
 
+size_t BuildSetFocus(std::span<uint8_t> out, uint32_t sessionId, bool focused) {
+    const size_t total = WriteCommon(out, MsgType::SetFocus, 0, Chan::Control, sessionId, 1);
+    if (!total) return 0;
+    out[kCommonHeaderSize] = focused ? 1 : 0;
+    return total;
+}
+
 size_t BuildReconfig(std::span<uint8_t> out, uint32_t sessionId, const Reconfig& m) {
     constexpr size_t kPayload = 8;
     const size_t total = WriteCommon(out, MsgType::Reconfig, 0, Chan::Control, sessionId, kPayload);
@@ -296,6 +303,11 @@ std::optional<Reconfig> ParseReconfig(std::span<const uint8_t> payload) {
     if (payload.size() < 8) return std::nullopt;
     const uint8_t* p = payload.data();
     return Reconfig{GetU16(p), GetU16(p + 2), GetU32(p + 4)};
+}
+
+std::optional<bool> ParseSetFocus(std::span<const uint8_t> payload) {
+    if (payload.empty()) return std::nullopt;
+    return payload[0] != 0;
 }
 
 std::optional<VideoPacketView> ParseVideoPacket(const CommonHeader& h,
