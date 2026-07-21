@@ -1,6 +1,6 @@
 # GĐ3 — Client Android (view-only)
 
-Client Android đầu tiên, **chỉ xem** — chưa gửi input, chưa `LIST_SOURCES`.
+Client Android đầu tiên, **chỉ xem** — chưa gửi input.
 Mạng + giải mã là C++ (dùng lại `core/`), UI là Kotlin + Jetpack Compose.
 
 ## 1. Phân chia Kotlin / C++
@@ -15,6 +15,7 @@ phải build được bằng toolchain NDK). Nên toàn bộ `ClientSession` / `
 | `UdpSocket.cpp` (winsock)  | `UdpSocket.cpp` (BSD)       | datagram vào/ra               |
 | `MfDecoder` + `Renderer`   | `MediaCodecDecoder`         | H.264 -> màn hình             |
 | `MainMenuWindow` (Win32)   | `MainActivity` (Compose)    | nhập địa chỉ, chọn kết nối    |
+| `SourcePickerDialog`       | `MainActivity` (một bước)   | chọn cửa sổ muốn xem          |
 | cửa sổ preview             | `StreamActivity` (Compose)  | SurfaceView + overlay số liệu |
 
 Ranh giới cố ý mỏng, gói gọn trong `JniBridge.cpp` + `NativeClient.kt`: Kotlin chỉ
@@ -66,6 +67,22 @@ riêng một lần, rồi vẫn gửi trọn frame — SPS/PPS trùng là hợp 
 **RECONFIG.** `MfDecoder` tự đàm phán lại kích thước qua
 `MF_E_TRANSFORM_STREAM_CHANGE`. MediaCodec đã configure cứng kích thước, nên
 `onReconfig` đặt cờ dựng lại codec. Host gửi kèm IDR nên không mất gì.
+
+**Chọn nguồn.** `QuerySources()` (`SourceQuery.cpp`) là bản port của
+`QueryHostSources()` bên Windows: mở socket riêng, phát `LIST_SOURCES` mỗi 500ms trong
+3 giây, chờ `SOURCE_LIST`. Đứng NGOÀI `ClientLoop` vì nó chạy trước khi có phiên —
+không sessionId, không thread. Nó chặn tới 3 giây nên `NativeClient.listSources()` bọc
+lại bằng `withContext(Dispatchers.IO)`.
+
+JNI trả về `Array<String>` mỗi dòng `"id\twidth\theight\tname"` chứ không dựng object
+Kotlin từ C++: bên đó chỉ cần `NewStringUTF`, khỏi phải tra `FindClass`/`GetMethodID`
+cho một kiểu chỉ dùng đúng một chỗ. Kotlin `split('\t', limit = 4)` — `limit` là bắt
+buộc, tiêu đề cửa sổ có thể chứa tab.
+
+Danh sách rỗng gộp hai trường hợp — host im lặng (bản cũ, hoặc mất gói) và host không
+chia sẻ gì — thành một: cứ vào nguồn 0 và để `ClientSession` báo lỗi thật. Một nguồn
+thì bỏ qua luôn màn chọn. Khác `SourcePickerDialog` bên Windows ở chỗ chỉ chọn được
+MỘT nguồn: bên đó mỗi nguồn là một cửa sổ preview riêng, ở đây chỉ có một Activity.
 
 **Độ trễ.** Đặt khóa `"low-latency"` (đối ứng `MF_LOW_LATENCY`) để codec không giữ
 frame sắp xếp lại thứ tự hiển thị — chuỗi của ta không có B-frame nên không mất gì.
@@ -151,8 +168,9 @@ này KHÔNG commit.
 Cảnh báo `[CXX5304] SDK XML version 4` khi configure CMake là vô hại: NDK 26.1 cũ hơn
 SDK tools đang cài. Không ảnh hưởng kết quả biên dịch.
 
-Mở app, gõ địa chỉ host, bấm **Kết nối** — địa chỉ được nhớ lại cho lần sau. Vẫn
-chạy thẳng được từ adb khi cần test nhanh:
+Mở app, gõ địa chỉ host, bấm **Connect** — địa chỉ được nhớ lại cho lần sau. Host chia
+sẻ nhiều cửa sổ thì hiện màn chọn nguồn (Back quay lại ô địa chỉ). Vẫn chạy thẳng được
+từ adb khi cần test nhanh — đường này bỏ qua màn chọn, luôn vào nguồn 0:
 
 ```
 adb shell am start -n com.rgc.remotegame/.MainActivity --es addr 192.168.1.10:47777
@@ -176,8 +194,7 @@ Một ngoại lệ có lý do: `~/.gradle/gradle.properties` để comment tiế
 
 ## 5. Hạn chế đã biết (chưa làm, không phải bug)
 
-- **Chỉ nguồn 0**: chưa gửi `LIST_SOURCES` nên host chia sẻ nhiều cửa sổ thì luôn
-  xem cửa sổ đầu. Cần thêm màn hình chọn nguồn.
+- **Một nguồn tại một thời điểm**: chọn được cửa sổ nào để xem, nhưng không xem được
+  nhiều cửa sổ cùng lúc như client Windows.
 - **Số đo e2e sai** (xem §6).
 - **Chưa gửi input** (GĐ4 cho Android).
-- **Chỉ `arm64-v8a`**.

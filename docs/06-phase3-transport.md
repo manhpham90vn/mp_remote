@@ -269,6 +269,60 @@ Log mỗi 1s ở client (console): `fps nhận | kbps | frame bỏ | %gói mất
 | M3 | **Hai máy LAN** | realtime, log đủ chỉ số — tiêu chí xong GĐ3 |
 | M4 | Giả lập mạng xấu (tool clumsy: drop 2–5%) | vỡ hình ≤ vài trăm ms rồi tự phục hồi qua IDR |
 
+## 7b. Mất gói theo CHÙM — đo được gì, và một giả thuyết đã bị bác bỏ
+
+Đo ngày 2026-07-21, host Windows (Intel Quick Sync) → Pixel 4 qua Wi-Fi 5 GHz,
+nguồn Screen 1 3440×1440 @60fps 20 Mbps.
+
+**Mất gói ở đây gần như 100% là mất theo chùm.** `Reassembler::Stats::lossRuns` (thêm
+để đo đúng việc này) cho phân bố dứt khoát: cả phiên chỉ có **một** chùm dài 1 gói,
+còn lại nằm hết ở nhóm ≥32 gói, dài nhất **384 gói liên tiếp (~450 KB)**.
+
+Hệ quả trực tiếp: **`fec+0` không phải bug.** `Packetizer` nhóm `kFecGroupSize` gói
+LIÊN TIẾP và `TryRecover` bỏ cuộc ngay khi `missing != 1`, nên một chùm ≥2 gói đã đủ
+vô hiệu hoá parity. Interleave cũng không cứu được: muốn gỡ chùm 384 gói thì cần 384
+gói parity, tức 100% overhead. Đừng nới FEC để chữa loss ở đây.
+
+### Giả thuyết đã thử và ĐÃ BỊ BÁC BỎ: pacing phía gửi
+
+Suy luận ban đầu: `Packetizer::SendFrame` bắn cả frame vào `send` trong một vòng `for`
+không nghỉ, nên một IDR 450 KB rời NIC 1 Gbps thành một chùm liền; xuống Wi-Fi
+~300 Mbps thì hàng đợi chỗ thắt tràn và tail-drop nguyên dải. Đã cài `Pacer` (token
+bucket + `CreateWaitableTimerExW` độ phân giải cao) rải gói ở 3× bitrate.
+
+**Kết quả đo: không sửa được loss, mà làm mọi thứ khác xấu đi.**
+
+| | trước pacing | sau pacing |
+|---|---|---|
+| chùm dài nhất | 384 gói | 352 gói — gần như không đổi |
+| fps client | 11–38 | 3–37 (tụt còn 3–6 lúc xấu) |
+| e2e | 141–397 ms | 249–785 ms |
+
+Ở những giây tốt, pacing rải ở ~9 Mbps tức ngủ trước **từng gói một** (1 gói = 1,06 ms
+> ngưỡng 500 µs) — mượt tối đa có thể — mà chùm 352 gói vẫn mất. Nếu burst phía gửi là
+nguyên nhân thì mức rải đó phải xoá được nó.
+
+Hai bài học giữ lại:
+
+1. **Pacing không được bám theo bitrate đã bị congestion control siết.** Bitrate tụt →
+   tốc độ rải tụt xuống dưới mức encoder đang thực sự sinh ra → hàng đợi gửi phình
+   (đo được `q` tới 426 gói, pacing tự thêm 91 ms) → trễ tăng → loss → lại siết
+   bitrate. Vòng xoáy tự tạo.
+2. **Không được ngủ trong đường `onPacket`.** Encoder gọi `onPacket` ngay trong
+   `Encode()` (`MfEncoder.cpp:443`, `NvencEncoder.cpp:237`), mà `Encode()` chạy dưới
+   `encMutex` trong callback FrameArrived của WGC. Bản pacing đầu ngủ ở đó và kéo
+   stream về ~0 kbps, e2e 13,8 giây. Phải xếp hàng rồi rải ở thread riêng.
+
+`client/windows/Pacer.{h,cpp}` còn trong repo nhưng **không nối vào build** — giữ làm
+nguyên liệu nếu quay lại, với chính sách chọn tốc độ khác.
+
+### Hướng chưa loại trừ
+
+`lossRuns` đếm mảnh thiếu **trong một frame**, và chùm luôn nằm ở **đuôi** frame. Có
+khả năng một phần con số "mất" thật ra là **tới muộn**: Reassembler hết hạn chờ frame
+trước khi đuôi kịp tới rồi tính phần đuôi là mất. Cần tách bạch hai thứ này bằng đo
+riêng trước khi thiết kế lại bất cứ thứ gì — chưa đo thì chưa biết loss thật bao nhiêu.
+
 ## 8. Thứ tự triển khai
 
 1. ✅ Lập thư viện `core/` (CMake target `core`, app link vào; toàn repo build

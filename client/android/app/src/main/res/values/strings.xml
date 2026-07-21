@@ -9,6 +9,12 @@
     <string name="emulator_hint">Emulators reach the host machine at 10.0.2.2</string>
     <string name="enter_address_first">Enter a host address first</string>
 
+    <!-- Chọn nguồn -->
+    <string name="looking_for_sources">Looking for shared windows…</string>
+    <string name="pick_source">Which window do you want to watch?</string>
+    <string name="unnamed_source">Source %1$d</string>
+    <string name="source_size">%1$d × %2$d</string>
+
     <!-- Màn hình xem -->
     <string name="connecting_to">Connecting to %1$s…</string>
     <string name="invalid_address">Invalid address: %1$s</string>

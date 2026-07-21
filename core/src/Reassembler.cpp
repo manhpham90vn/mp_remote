@@ -145,6 +145,28 @@ void Reassembler::Drop(PendingMap::iterator it, bool loss) {
     if (loss) {
         ++stats_.framesDropped;
         stats_.packetsLost += uint64_t(it->second.pktCount - it->second.received);
+
+        // Đếm chùm mất liên tiếp (xem Stats::lossRuns). Chỉ chạy trên frame BỎ ĐI nên
+        // không nằm trên đường nóng.
+        const Pending& f = it->second;
+        size_t run = 0;
+        for (size_t i = 0; i <= f.pktCount; ++i) {
+            const bool gone = i < f.pktCount && f.pieces[i].empty();
+            if (gone) {
+                ++run;
+            } else if (run) {
+                size_t b = 0;
+                if (run <= 3)       b = run - 1;   // 1, 2, 3 tách riêng: chùm ngắn là
+                else if (run < 8)   b = 3;         // thứ FEC hiện tại còn có cửa cứu
+                else if (run < 16)  b = 4;
+                else if (run < 32)  b = 5;
+                else                b = 6;
+                ++stats_.lossRuns[b];
+                if (run > stats_.lossRunMax) stats_.lossRunMax = run;
+                run = 0;
+            }
+        }
+
         lossEvent_ = true;
         ++stats_.lossEvents;
         waitingForIdr_ = true; // frame sau tham chiếu frame vừa mất → phải chờ IDR

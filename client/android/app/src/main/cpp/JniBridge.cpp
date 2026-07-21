@@ -12,11 +12,14 @@
 #include <android/native_window_jni.h>
 #include <jni.h>
 
+#include <cstdio>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "ClientLoop.h"
 #include "Log.h"
+#include "SourceQuery.h"
 #include "UdpSocket.h"
 
 namespace {
@@ -30,15 +33,50 @@ jstring ToJString(JNIEnv* env, const std::string& s) {
     return env->NewStringUTF(s.c_str());
 }
 
+// Đọc jstring rồi thả ngay — mọi hàm dưới đây chỉ cần bản copy.
+std::string FromJString(JNIEnv* env, jstring s) {
+    if (!s) return {};
+    const char* c = env->GetStringUTFChars(s, nullptr);
+    std::string out = c ? c : "";
+    if (c) env->ReleaseStringUTFChars(s, c);
+    return out;
+}
+
 } // namespace
 
 extern "C" {
 
+// Trả về mảng String, mỗi dòng "id\twidth\theight\tname" — xem NativeClient.kt.
+// Mảng RỖNG nghĩa là host không trả lời (bản cũ / mất gói), KHÁC với host trả lời
+// rằng nó không chia sẻ gì; Kotlin gộp cả hai thành "cứ thử nguồn 0".
+// CHẶN tới ~3s: gọi trên thread nền.
+JNIEXPORT jobjectArray JNICALL
+Java_com_rgc_remotegame_NativeClient_nativeListSources(JNIEnv* env, jobject, jstring addrStr) {
+    jclass stringClass = env->FindClass("java/lang/String");
+
+    const std::string addr = FromJString(env, addrStr);
+    NetAddr server;
+    std::vector<rgc::SourceInfo> sources;
+    if (ParseNetAddr(addr, kDefaultPort, server)) {
+        QuerySources(server, sources);
+    } else {
+        LOGE("[JNI] Invalid host address: \"%s\"", addr.c_str());
+    }
+
+    jobjectArray arr = env->NewObjectArray(jsize(sources.size()), stringClass, nullptr);
+    for (size_t i = 0; i < sources.size(); ++i) {
+        const rgc::SourceInfo& s = sources[i];
+        char head[32];
+        std::snprintf(head, sizeof(head), "%u\t%u\t%u\t", s.sourceId, s.width, s.height);
+        env->SetObjectArrayElement(arr, jsize(i), ToJString(env, head + s.name));
+    }
+    return arr;
+}
+
 JNIEXPORT jboolean JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeStart(JNIEnv* env, jobject, jstring addrStr) {
-    const char* c = env->GetStringUTFChars(addrStr, nullptr);
-    const std::string addr = c ? c : "";
-    if (c) env->ReleaseStringUTFChars(addrStr, c);
+Java_com_rgc_remotegame_NativeClient_nativeStart(JNIEnv* env, jobject, jstring addrStr,
+                                                 jint sourceId) {
+    const std::string addr = FromJString(env, addrStr);
 
     NetAddr server;
     if (!ParseNetAddr(addr, kDefaultPort, server)) {
@@ -47,7 +85,7 @@ Java_com_rgc_remotegame_NativeClient_nativeStart(JNIEnv* env, jobject, jstring a
     }
 
     g_client = std::make_unique<ClientLoop>();
-    if (!g_client->Start(server)) {
+    if (!g_client->Start(server, uint8_t(sourceId))) {
         g_client.reset();
         return JNI_FALSE;
     }

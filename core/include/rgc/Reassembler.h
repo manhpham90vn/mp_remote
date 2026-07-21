@@ -42,6 +42,16 @@ public:
         uint64_t packetsLost     = 0; // ước lượng: mảnh còn thiếu của các frame đã bỏ
         uint64_t lossEvents      = 0;
         uint64_t packetsRecovered = 0; // mảnh dựng lại được từ parity FEC
+
+        // Phân bố ĐỘ DÀI CHÙM gói mất liên tiếp trong một frame bị bỏ, thang gấp đôi:
+        // [0]=1, [1]=2, [2]=3, [3]=4..7, [4]=8..15, [5]=16..31, [6]=≥32.
+        // Đây là con số quyết định thiết kế FEC, không phải tỉ lệ mất gói: parity XOR
+        // trên kFecGroupSize gói LIÊN TIẾP cứu được đúng một gói mỗi nhóm, nên chùm ≥2
+        // (rơi trọn vào một nhóm) làm FEC vô dụng. Loss 5% toàn chùm-1 và loss 5% toàn
+        // chùm-20 đòi hai cách chữa hoàn toàn khác nhau — cái đầu interleave là xong,
+        // cái sau phải chặn từ gốc (pacing/bitrate) vì không parity nào gánh nổi.
+        uint64_t lossRuns[7] = {};
+        uint64_t lossRunMax  = 0; // chùm dài nhất từng thấy, tính bằng gói
     };
 
     // `frameIntervalUs`: khoảng cách frame kỳ vọng (1e6/fps) — mốc cho timeout bỏ frame.

@@ -63,7 +63,8 @@ class StreamActivity : ComponentActivity() {
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
 
         val addr = intent.getStringExtra("addr").orEmpty()
-        started = NativeClient.nativeStart(addr)
+        // Không có "source" (vd. chạy thẳng từ adb) -> nguồn 0, như trước.
+        started = NativeClient.nativeStart(addr, intent.getIntExtra("source", 0))
 
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {

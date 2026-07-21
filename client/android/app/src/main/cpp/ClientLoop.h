@@ -1,10 +1,11 @@
 #pragma once
 //
 // ClientLoop — vòng đời client trên Android, bản port của client/windows/ClientLoop.cpp
-// cho GĐ3 (view-only: chưa gửi input, chưa LIST_SOURCES — luôn xem nguồn 0).
+// cho GĐ3 (view-only: chưa gửi input). Nguồn muốn xem do caller chọn sẵn qua
+// QuerySources() (SourceQuery.h) rồi truyền vào Start().
 //
 // Ba thread, đúng lý do như bên Windows:
-//   Main (android_main): bơm sự kiện app, giao/thu hồi Surface.
+//   Main (UI thread của Activity): giao/thu hồi Surface, hỏi trạng thái.
 //   Net: recvfrom -> ClientSession + Reassembler -> đẩy frame vào hàng đợi.
 //   Decode: rút frame -> MediaCodecDecoder -> Surface.
 // Vì sao tách Net và Decode: nếu decode chặn thread Net thì recvfrom ngừng nghe,
@@ -36,7 +37,9 @@ public:
     ClientLoop(const ClientLoop&) = delete;
     ClientLoop& operator=(const ClientLoop&) = delete;
 
-    bool Start(const NetAddr& server);
+    // `sourceId` lấy từ SOURCE_LIST (xem SourceQuery.h); 0 = nguồn đầu tiên, cũng là
+    // thứ host bản cũ (một nguồn) hiểu được.
+    bool Start(const NetAddr& server, uint8_t sourceId);
     void Stop();
 
     // Giao Surface mới, hoặc nullptr khi hệ điều hành thu hồi (APP_CMD_TERM_WINDOW).
@@ -65,6 +68,7 @@ private:
     void DecodeThread();
 
     NetAddr   server_{};
+    uint8_t   sourceId_ = 0;
     UdpSocket sock_;
 
     std::thread netThread_;

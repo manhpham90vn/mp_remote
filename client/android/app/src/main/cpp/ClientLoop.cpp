@@ -23,8 +23,9 @@ std::string ClientLoop::EndReason() {
     return endReason_;
 }
 
-bool ClientLoop::Start(const NetAddr& server) {
-    server_ = server;
+bool ClientLoop::Start(const NetAddr& server, uint8_t sourceId) {
+    server_   = server;
+    sourceId_ = sourceId;
     if (!sock_.Open(0)) { // cổng ngẫu nhiên
         LOGE("[Client] Failed to open socket.");
         return false;
@@ -43,7 +44,7 @@ bool ClientLoop::Start(const NetAddr& server) {
     }
     decodeThread_ = std::thread([this] { DecodeThread(); });
     netThread_    = std::thread([this] { NetThread(); });
-    LOGI("[Client] Connecting to %s ...", server_.ToString().c_str());
+    LOGI("[Client] Connecting to %s (source %u) ...", server_.ToString().c_str(), sourceId_);
     return true;
 }
 
@@ -215,7 +216,7 @@ void ClientLoop::NetThread() {
     hello.maxHeight  = 2160;
     hello.desiredFps = 60;
     hello.features   = 0;
-    hello.sourceId   = 0; // view-only v1: luôn nguồn đầu tiên
+    hello.sourceId   = sourceId_;
     session.Start(hello, NowUs());
 
     uint8_t buf[rgc::kMaxDatagram];
@@ -305,6 +306,19 @@ void ClientLoop::NetThread() {
                  st.packetsRecovered - lastStats.packetsRecovered,
                  session.lastRttUs() / 1000.0,
                  e2e >= 0 ? e2e / 1000.0 : 0.0);
+
+            // Chỉ in khi giây vừa rồi CÓ mất gói: chùm-1 thì FEC hiện tại cứu được,
+            // chùm ≥2 thì không (xem Stats::lossRuns).
+            uint64_t d[7], runs = 0;
+            for (size_t i = 0; i < 7; ++i) {
+                d[i] = st.lossRuns[i] - lastStats.lossRuns[i];
+                runs += d[i];
+            }
+            if (runs)
+                LOGI("[Client]   loss runs: 1x%" PRIu64 " 2x%" PRIu64 " 3x%" PRIu64
+                     " 4-7x%" PRIu64 " 8-15x%" PRIu64 " 16-31x%" PRIu64 " 32+x%" PRIu64
+                     "  | longest ever %" PRIu64 " pkts",
+                     d[0], d[1], d[2], d[3], d[4], d[5], d[6], st.lossRunMax);
 
             // Bản gọn cho overlay trên màn hình (logcat giữ bản đầy đủ ở trên).
             char ui[160];

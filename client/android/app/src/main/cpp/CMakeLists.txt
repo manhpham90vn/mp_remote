@@ -18,6 +18,7 @@ add_library(remotegame SHARED
     JniBridge.cpp
     ClientLoop.cpp
     MediaCodecDecoder.cpp
+    SourceQuery.cpp
     UdpSocket.cpp
 )
 
