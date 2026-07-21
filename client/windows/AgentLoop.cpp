@@ -54,6 +54,7 @@
 #include <wrl/client.h>
 
 #include "capture/GpuSelect.h"
+#include "ElevatedShare.h" // IsProcessElevated — chẩn đoán UIPI khi bật điều khiển
 #include "input/InputInjector.h"
 #include "encode/IVideoEncoder.h"
 #include "net/NetInfo.h"
@@ -523,10 +524,17 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         p->netReady.store(true, std::memory_order_release);
     }
 
-    if (opt.allowInput)
-        std::printf("[Agent] Client control allowed (mouse + keyboard).\n");
-    else
+    if (opt.allowInput) {
+        // UIPI nuốt SendInput IM LẶNG khi đích chạy ở mức toàn vẹn cao hơn (game có
+        // anti-cheat thường chạy admin). Không có dòng này thì triệu chứng "gõ không
+        // ăn" nhìn y hệt lỗi mạng/tiêu điểm — xem ElevatedShare.h.
+        const bool elevated = IsProcessElevated();
+        std::printf("[Agent] Client control allowed (mouse + keyboard). Host elevated: %s%s\n",
+                    elevated ? "YES" : "NO",
+                    elevated ? "" : " — input will NOT reach apps running as administrator");
+    } else {
         std::printf("[Agent] VIEW ONLY - input from client is ignored.\n");
+    }
     std::printf("[Agent] Sharing %zu source(s). Waiting for client...\n", live.size());
 
     // --- Vòng Recv (thread chính), dùng chung cho mọi nguồn ---
@@ -672,14 +680,19 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                 const uint32_t cap = p->captured.load();
                 const uint64_t by = p->bytesSent.load(), fr = p->framesSent.load();
                 const auto& ist = p->session->inputStats();
+                // `applied` là thống kê MẠNG (event tới nơi và được giao cho injector),
+                // KHÔNG phải bằng chứng phím đã tới ứng dụng. Injector còn vứt tiếp ở
+                // cổng tiêu điểm — `skipped` là con số duy nhất lộ ra chuyện đó. Thiếu
+                // nó thì "gõ không ăn" không phân biệt được với "không nhận được gói".
                 std::printf("[Agent][%s] %-9s | capture %.0f fps | send %.0f fps, %.0f kbps"
-                            " | input %llu (lost %llu)\n",
+                            " | input %llu (lost %llu, skipped %llu)\n",
                             p->name.c_str(), StateName(p->session->state()),
                             (cap - p->lastCaptured) / secs,
                             (fr - p->lastFrames) / secs,
                             (by - p->lastBytes) * 8.0 / 1000.0 / secs,
                             (unsigned long long)ist.applied,
-                            (unsigned long long)ist.lost);
+                            (unsigned long long)ist.lost,
+                            (unsigned long long)p->injector.skipped());
                 p->lastCaptured = cap;
                 p->lastBytes = by;
                 p->lastFrames = fr;
