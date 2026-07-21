@@ -87,6 +87,17 @@ const char* StateName(rgc::HostSession::State s) {
     return "?";
 }
 
+// Cỡ khung nhỏ nhất còn encode được. Encoder phần cứng từ chối khung quá nhỏ —
+// NVENC trả "status=8 Frame Dimension less than the minimum supported value", MF
+// trả 0xC00D6D76 ở SetOutputType. Ca gặp thật: người dùng THU NHỎ cửa sổ đang share,
+// WGC báo về 146x20 (log 21/07/2026).
+//
+// Ngưỡng đặt cao hơn mức tối thiểu thật của NVENC một quãng an toàn, vì hai backend
+// có ngưỡng khác nhau và ta không muốn dò từng cái. Cửa sổ nhỏ hơn cỡ này thì có
+// stream được cũng chẳng ai xem nổi.
+inline constexpr uint32_t kMinEncodeW = 160;
+inline constexpr uint32_t kMinEncodeH = 64;
+
 // Toàn bộ trạng thái của MỘT nguồn. Chứa mutex/atomic nên không copy/move được —
 // giữ trong vector<unique_ptr>.
 struct SourcePipeline {
@@ -111,7 +122,14 @@ struct SourcePipeline {
     std::atomic<bool>     wantFec{false};
     std::atomic<uint32_t> curBitrateBps{0};
     std::atomic<bool>     netReady{false};
+    // failed = HỎNG THẬT, một chiều: không có backend encoder, capture không start
+    // được. Nguồn coi như chết tới hết phiên.
     std::atomic<bool>     failed{false};
+    // paused = TẠM không encode được (nguồn nhỏ hơn kMinEncode*), HAI CHIỀU. Tách
+    // khỏi `failed` vì trước đây gộp chung: cửa sổ thu nhỏ làm ensureEncoder hỏng →
+    // failed=true → onFrame thoát ngay ở đầu hàm → không bao giờ thấy cửa sổ mở lại
+    // → phiên chết vĩnh viễn dù nguồn đã bình thường trở lại (log 21/07/2026).
+    std::atomic<bool>     paused{false};
     std::atomic<bool>     forceIdr{false};
     std::atomic<uint64_t> peerPacked{0}; // NetAddr::Pack của client hiện tại (0 = chưa có)
     std::atomic<uint64_t> bytesSent{0}, framesSent{0};
@@ -333,6 +351,29 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                 p->haveCached.store(false, std::memory_order_release);
                 p->sizeChanged.store(true, std::memory_order_release);
             }
+
+            // Nguồn nhỏ hơn mức encoder nhận (cửa sổ vừa bị thu nhỏ). TRẠNG THÁI
+            // TẠM, không phải lỗi: bỏ qua frame và giữ nguyên phiên.
+            //
+            // Chặn ở ĐÚNG chỗ này mới thoát được: trên nó là đoạn ghi nhận kích
+            // thước — vẫn phải chạy, vì đó là thứ duy nhất cho ta biết cửa sổ đã mở
+            // to trở lại. Dưới nó là cache + encode — đều vô nghĩa ở cỡ này. Thoát
+            // sớm hơn (như `failed` làm) là tự bịt mắt: không còn đường nhận ra
+            // nguồn đã bình thường, phiên treo vĩnh viễn.
+            //
+            // Không đụng cachedTex: đoạn đổi kích thước ở trên đã haveCached=false,
+            // nên nhánh keepalive của thread Recv tự nhiên không bắn — khỏi phải
+            // thêm điều kiện ở đó.
+            if (encW < kMinEncodeW || encH < kMinEncodeH) {
+                if (!p->paused.exchange(true, std::memory_order_acq_rel))
+                    std::printf("[Agent][%s] Source too small to encode (%ux%u) —"
+                                " paused, waiting for it to grow back.\n",
+                                p->name.c_str(), encW, encH);
+                return;
+            }
+            if (p->paused.exchange(false, std::memory_order_acq_rel))
+                std::printf("[Agent][%s] Source back to %ux%u — resuming.\n",
+                            p->name.c_str(), encW, encH);
 
             // Lưu bản SAO của frame cuối. Bắt buộc phải copy chứ không giữ con trỏ:
             // texture của WGC chỉ sống trong phạm vi callback (xem CaptureTypes.h).
@@ -578,7 +619,12 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             // Nguồn vừa đổi kích thước (thread FrameArrived đã dựng lại encoder).
             // Báo client kích thước mới + IDR: stream đổi SPS giữa chừng, không có
             // IDR thì decoder client chỉ có rác cho tới keyframe kế tiếp.
-            if (p->sizeChanged.exchange(false, std::memory_order_acq_rel)) {
+            // `paused` đứng TRƯỚC exchange là cố ý: short-circuit giữ nguyên cờ
+            // sizeChanged trong lúc tạm dừng. Client không phải dựng lại decoder cho
+            // một cỡ suy biến (146x20) rồi lát nữa dựng lại lần nữa; và lúc nguồn to
+            // trở lại, onFrame set cờ lần nữa nên RECONFIG vẫn được gửi đúng cỡ mới.
+            if (!p->paused.load(std::memory_order_acquire) &&
+                p->sizeChanged.exchange(false, std::memory_order_acq_rel)) {
                 p->offer.width      = uint16_t(p->srcW.load());
                 p->offer.height     = uint16_t(p->srcH.load());
                 p->offer.bitrateBps = p->curBitrateBps.load(std::memory_order_relaxed);
