@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!--
+  client.manifest — application manifest nhúng vào client.exe.
+
+  MỤC ĐÍCH: gắn danh tính + khai báo tương thích cho exe. Exe điều khiển từ xa
+  (capture màn hình + bơm input + firewall) rất dễ bị Windows Defender/SmartScreen
+  báo nhầm là RAT khi KHÔNG có metadata; manifest + version info giảm hẳn việc đó.
+
+  CỐ Ý KHÔNG khai hai thứ sau, vì code đã tự làm ở main.cpp — khai lại sẽ đè/xung đột:
+    - dpiAwareness  → main.cpp gọi SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)
+    - activeCodePage→ main.cpp gọi SetConsoleOutputCP(CP_UTF8) + setlocale ".UTF8"
+
+  requestedExecutionLevel = asInvoker: app KHÔNG chạy admin sẵn; khi cần quyền cao để
+  bơm input vào cửa sổ elevated, nó tự bung UAC bằng ShellExecuteEx "runas" (xem
+  ElevatedShare.h). Đặt requireAdministrator ở đây sẽ bắt UAC ngay cả khi chỉ xem.
+-->
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <assemblyIdentity type="win32"
+                    name="Deskhub.Client"
+                    version="0.1.0.0"
+                    processorArchitecture="amd64"/>
+  <description>Deskhub - stream and remotely control an application</description>
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+      <requestedPrivileges>
+        <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}"/> <!-- Windows 10 / 11 -->
+      <supportedOS Id="{1f676c76-80e1-4239-95bb-83d0f6d0da78}"/> <!-- Windows 8.1 -->
+      <supportedOS Id="{4a2f28e3-53b9-4441-ba9c-d69d4a4a6e38}"/> <!-- Windows 8 -->
+      <supportedOS Id="{35138b9a-5d96-4fbd-8e2d-a2440225f93a}"/> <!-- Windows 7 -->
+    </application>
+  </compatibility>
+</assembly>

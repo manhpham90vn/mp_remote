@@ -1,0 +1,43 @@
+// =============================================================================
+// client.rc — tài nguyên nhúng vào client.exe: application manifest + version info.
+//
+// VÌ SAO CÓ FILE NÀY
+//   Exe điều khiển từ xa không ký số + không metadata rất hay bị Defender/SmartScreen
+//   báo nhầm virus. Gắn version info (CompanyName/ProductName/version) và manifest
+//   khiến exe "có danh tính", giảm tỷ lệ báo nhầm. Fix triệt để vẫn là KÝ SỐ.
+//
+//   ID 1, kiểu 24 (RT_MANIFEST) là manifest khởi tạo tiến trình. Vì nhúng qua .rc,
+//   CMakeLists tắt manifest mặc định của linker (/MANIFEST:NO) để không trùng.
+// =============================================================================
+#include <windows.h>
+
+1 24 "client.manifest"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION 0,1,0,0
+ PRODUCTVERSION 0,1,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS VOS_NT_WINDOWS32
+ FILETYPE VFT_APP
+ FILESUBTYPE VFT2_UNKNOWN
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"  // US English, Unicode
+        BEGIN
+            VALUE "CompanyName",      "Deskhub"
+            VALUE "FileDescription",  "Deskhub - stream & remotely control an application"
+            VALUE "FileVersion",      "0.1.0.0"
+            VALUE "InternalName",     "client"
+            VALUE "LegalCopyright",   "Copyright (C) 2026 Deskhub"
+            VALUE "OriginalFilename", "client.exe"
+            VALUE "ProductName",      "Deskhub"
+            VALUE "ProductVersion",   "0.1.0.0"
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END
