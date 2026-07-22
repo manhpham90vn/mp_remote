@@ -65,6 +65,7 @@
 #include "decode/IVideoDecoder.h"
 #include "decode/Renderer.h"
 #include "deskhubp/Clock.h"
+#include "ui/ViewerWindow.h"
 #include "Diag.h"
 
 #include "deskhub/control/LinkStats.h"
@@ -81,6 +82,16 @@ BOOL WINAPI CtrlHandler(DWORD type) {
         return TRUE;
     }
     return FALSE;
+}
+
+// Tên nguồn giữ dạng UTF-8 (đi trên dây); cửa sổ quản lý cần UTF-16 hiển thị.
+std::wstring FromUtf8(const std::string& s) {
+    if (s.empty()) return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), nullptr, 0);
+    if (n <= 0) return {};
+    std::wstring w(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), n);
+    return w;
 }
 
 // Toàn bộ trạng thái của MỘT nguồn đang xem. Chứa mutex/atomic/thread nên không
@@ -102,6 +113,10 @@ struct ClientStream {
     std::atomic<uint32_t> negW{0}, negH{0}; // kích thước đàm phán — main tạo renderer
     std::atomic<bool> quit{false};
     std::atomic<bool> failed{false};
+    // Đã ẩn cửa sổ preview sau khi nguồn dừng — chỉ luồng Main chạm. Renderer
+    // không tự DestroyWindow khi WM_CLOSE (xem Renderer.cpp) nên luồng Main phải
+    // tự ẩn, không thì cửa sổ đứng hình nằm lại tới hết phiên.
+    bool windowHidden = false;
 
     // Input do luồng Main gom -> luồng Recv đánh seq và gửi. Khóa chỉ giữ vài chục
     // nano giây quanh push/swap, không nằm trên đường nóng của video.
@@ -575,32 +590,45 @@ int RunClient(const ClientOptions& opt) {
     }
     if (wanted.size() > deskhub::kMaxSources) wanted.resize(deskhub::kMaxSources);
 
+    // Cửa sổ quản lý phiên xem (đối xứng với SessionWindow phía host): hiện danh
+    // sách nguồn host đang chia sẻ, nút Refresh / View / Stop / Disconnect. Chạy
+    // thread UI riêng, nói chuyện với vòng Main qua hộp thư — xem ui/ViewerWindow.h.
+    ViewerWindow ui;
+    ui.Start(opt.server, deskhub::kMaxSources);
+
     std::vector<std::unique_ptr<ClientStream>> streams;
-    for (auto& w : wanted) {
+
+    // Dựng MỘT stream + phóng thread Recv của nó. Dùng cho cả nguồn ban đầu lẫn
+    // nguồn mở giữa phiên (nút View). Hỏng thì chỉ nguồn đó không xem được,
+    // không kéo cả phiên xuống theo.
+    auto addStream = [&](deskhub::SourceInfo src) -> bool {
         auto s = std::make_unique<ClientStream>();
-        s->src = std::move(w);
+        s->src = std::move(src);
         // MỘT socket riêng cho mỗi nguồn (cổng ngẫu nhiên). Khác phía host — bên đó
         // dùng chung một cổng và tự định tuyến gói. Ở đây tách ra thì mỗi thread
         // Recv có socket của riêng nó, khỏi phải khoá hay phân phối gói giữa thread.
         if (!s->sock.Open(0)) {
             std::printf("[Client] Failed to open a socket for source %u.\n", s->src.sourceId);
-            return 1;
+            return false;
         }
         // 10ms thay vì 100ms: input được gom và gửi trong Tick của vòng Recv, nên
         // timeout recvfrom chính là trần độ trễ input khi màn hình đang tĩnh (không
         // có gói video nào đánh thức vòng lặp). 100 wakeup/s là không đáng kể.
         s->sock.SetRecvTimeout(10);
-        streams.push_back(std::move(s));
-    }
-
-    std::printf("[Client] Connecting to %s (%zu source(s)) ...\n",
-        opt.server.ToString().c_str(), streams.size());
-
-    for (auto& s : streams) {
         ClientStream* ps = s.get();
+        streams.push_back(std::move(s)); // con trỏ ổn định — vector giữ unique_ptr
         ps->recvThread = std::thread([ps, &opt, &gpu] {
             StreamRecvLoop(*ps, opt, gpu.device.Get());
         });
+        return true;
+    };
+
+    std::printf("[Client] Connecting to %s (%zu source(s)) ...\n",
+        opt.server.ToString().c_str(), wanted.size());
+    for (auto& w : wanted) addStream(std::move(w));
+    if (streams.empty()) {
+        std::printf("[Client] No stream could be started.\n");
+        return 1;
     }
 
     // --- Thread Main: tạo cửa sổ khi biết kích thước, bơm message, lái input ---
@@ -633,8 +661,42 @@ int RunClient(const ClientOptions& opt) {
     };
 
     bool anyFailed = false;
+    uint64_t lastRowsUs = 0; // nhịp đẩy danh sách nguồn cho cửa sổ quản lý
     for (;;) {
         if (g_ctrlC.load()) break;
+        if (ui.stopRequested()) break; // nút Disconnect / đóng cửa sổ quản lý
+
+        // --- Lệnh từ cửa sổ quản lý: mở thêm nguồn (nút View) ---
+        for (auto& si : ui.TakeAdds()) {
+            size_t aliveCnt = 0;
+            bool dup = false;
+            for (auto& s : streams) {
+                if (s->quit.load() || s->failed.load()) continue;
+                ++aliveCnt;
+                if (s->src.sourceId == si.sourceId) dup = true;
+            }
+            if (dup) continue; // UI đã lọc, nhưng lệnh có thể về trễ một nhịp
+            if (aliveCnt >= deskhub::kMaxSources) {
+                std::printf("[Client] Cannot add \"%s\": already viewing %zu sources.\n",
+                    si.name.c_str(), aliveCnt);
+                continue;
+            }
+            std::printf("[Client] Adding source %u \"%s\".\n", si.sourceId, si.name.c_str());
+            addStream(std::move(si));
+        }
+
+        // --- Lệnh từ cửa sổ quản lý: dừng xem một nguồn (nút Stop selected) ---
+        // Đi ĐÚNG đường người dùng đóng cửa sổ preview: WM_CLOSE đặt cờ closed,
+        // vòng dưới thấy và quit stream như thường — không thêm đường tắt mới.
+        for (uint8_t id : ui.TakeRemoves()) {
+            for (auto& s : streams) {
+                if (s->quit.load() || s->src.sourceId != id) continue;
+                if (s->rendererReady.load())
+                    PostMessageW(s->renderer.Hwnd(), WM_CLOSE, 0, 0);
+                else
+                    s->quit.store(true); // chưa có cửa sổ (đang đàm phán) — dừng thẳng
+            }
+        }
 
         // Một Pump phục vụ mọi cửa sổ preview: PeekMessage không lọc theo HWND.
         Renderer::Pump();
@@ -684,6 +746,16 @@ int RunClient(const ClientOptions& opt) {
             }
 
             if (s->rendererReady.load() && s->renderer.Closed()) s->quit.store(true);
+
+            // Nguồn đã dừng (đóng cửa sổ / BYE / Stop selected) → ẨN cửa sổ preview.
+            // Renderer không tự DestroyWindow khi WM_CLOSE, và trước đây cửa sổ
+            // đứng hình nằm lại tới hết phiên; giờ phiên có thể sống rất lâu nhờ
+            // cửa sổ quản lý nên phải dọn cho mắt thấy. Chỉ ẩn, không destroy:
+            // thread Decode của nguồn có thể còn RenderNV12 một nhịp cuối.
+            if (s->quit.load() && s->rendererReady.load() && !s->windowHidden) {
+                ShowWindow(s->renderer.Hwnd(), SW_HIDE);
+                s->windowHidden = true;
+            }
             if (!s->quit.load()) anyAlive = true;
 
             // Dòng số liệu từ luồng Recv -> nhãn overlay.
@@ -699,7 +771,33 @@ int RunClient(const ClientOptions& opt) {
                 }
             }
         }
-        if (!anyAlive) break;
+        // Hết nguồn đang xem: còn cửa sổ quản lý thì GIỮ phiên đứng yên (người
+        // dùng còn nút View để mở nguồn khác); không có UI (tạo cửa sổ hỏng) thì
+        // giữ hành vi cũ — đóng hết preview là hết phiên.
+        if (!anyAlive && !ui.active()) break;
+
+        // Đẩy danh sách nguồn đang xem cho cửa sổ quản lý theo nhịp ~500ms.
+        // SetRows tự bỏ qua khi không có gì đổi.
+        const uint64_t nowUs = NowUs();
+        if (nowUs - lastRowsUs >= 500'000) {
+            lastRowsUs = nowUs;
+            std::vector<SessionSourceRow> rows;
+            for (auto& s : streams) {
+                if (s->quit.load() || s->failed.load()) continue;
+                SessionSourceRow r;
+                r.sourceId = s->src.sourceId;
+                const uint32_t nw = s->negW.load(), nh = s->negH.load();
+                r.pending = !nw;
+                wchar_t suffix[48];
+                if (nw)
+                    swprintf(suffix, 48, L"  (%ux%u)", nw, nh);
+                else
+                    swprintf(suffix, 48, L"  (connecting...)");
+                r.label = FromUtf8(s->src.name) + suffix;
+                rows.push_back(std::move(r));
+            }
+            ui.SetRows(std::move(rows));
+        }
 
         // Input đi theo cửa sổ preview đang foreground.
         if (opt.sendInput) {
@@ -726,6 +824,7 @@ int RunClient(const ClientOptions& opt) {
     for (auto& s : streams)
         if (s->recvThread.joinable()) s->recvThread.join();
 
+    ui.Stop();
     SetConsoleCtrlHandler(CtrlHandler, FALSE);
     std::printf("[Client] Stopped.\n");
     return anyFailed ? 1 : 0;

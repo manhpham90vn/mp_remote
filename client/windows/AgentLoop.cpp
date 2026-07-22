@@ -49,6 +49,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <utility>
 #include <vector>
 
 #include <wrl/client.h>
@@ -62,6 +63,7 @@
 #include "deskhubp/Clock.h"
 #include "net/UdpSocket.h"
 #include "capture/WindowCapture.h"
+#include "ui/SessionWindow.h"
 #include "Diag.h"
 
 #include "deskhub/control/BitrateController.h"
@@ -78,6 +80,16 @@ BOOL WINAPI CtrlHandler(DWORD type) {
         return TRUE;
     }
     return FALSE;
+}
+
+// Tên nguồn giữ dạng UTF-8 (để đi trên dây); cửa sổ phiên cần UTF-16 hiển thị.
+std::wstring FromUtf8(const std::string& s) {
+    if (s.empty()) return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), nullptr, 0);
+    if (n <= 0) return {};
+    std::wstring w(size_t(n), L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.c_str(), int(s.size()), w.data(), n);
+    return w;
 }
 
 const char* StateName(deskhub::HostSession::State s) {
@@ -127,6 +139,9 @@ struct SourcePipeline {
     // failed = HỎNG THẬT, một chiều: không có backend encoder, capture không start
     // được. Nguồn coi như chết tới hết phiên.
     std::atomic<bool> failed{false};
+    // Đã tắt hẳn (người dùng bấm Stop selected, hoặc dọn cuối phiên). Chỉ thread
+    // Recv chạm — để shutdownPipeline idempotent, gọi lại lần hai là no-op.
+    bool shutdownDone = false;
     // paused = TẠM không encode được (nguồn nhỏ hơn kMinEncode*), HAI CHIỀU. Tách
     // khỏi `failed` vì trước đây gộp chung: cửa sổ thu nhỏ làm ensureEncoder hỏng →
     // failed=true → onFrame thoát ngay ở đầu hàm → không bao giờ thấy cửa sổ mở lại
@@ -250,9 +265,9 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             wchar_t m[512];
             swprintf(m, 512,
                 L"Cannot start sharing: no free UDP port found from %u to %u.\n\n"
-                L"Several Deskhub hosts may still be running in the background "
-                L"(their windows stay hidden while sharing). Close them from Task "
-                L"Manager (client.exe) and try again.",
+                L"Several Deskhub hosts may still be running. Close their "
+                L"\"Deskhub - sharing\" windows (or end client.exe in Task "
+                L"Manager) and try again.",
                 unsigned(opt.port), unsigned(opt.port) + kPortTries - 1);
             MessageBoxW(nullptr, m, L"Deskhub", MB_OK | MB_ICONWARNING);
             return 1;
@@ -290,19 +305,33 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
     // Đây là tham số `minBps` của BitrateController — nó không bao giờ tụt quá đây.
     const uint32_t minBitrate = 1'000'000u;
 
+    // Cửa sổ quản lý phiên: hiện danh sách nguồn đang share, nhận lệnh Add /
+    // Stop selected / Stop sharing từ người dùng. Chạy trên thread UI riêng,
+    // nói chuyện với vòng Recv qua hộp thư — xem ui/SessionWindow.h. Mở NGAY từ
+    // đây để người dùng có thứ để nhìn trong lúc đợi frame đầu (màn hình chính
+    // đã bị ẩn trước khi vào RunAgent).
+    SessionWindow ui;
+    ui.Start(boundPort, deskhub::kMaxSources);
+
     std::vector<std::unique_ptr<SourcePipeline>> pipes;
-    for (size_t i = 0; i < sources.size(); ++i) {
+
+    // Cấp sourceId tăng dần và KHÔNG tái dùng id của nguồn đã tắt: client còn cầm
+    // SOURCE_LIST cũ mà HELLO lại trúng một nguồn mới toanh thì xem nhầm màn hình.
+    uint8_t nextSourceId = 0;
+    auto makePipeline = [&](const AgentSource& s) -> SourcePipeline* {
         auto p = std::make_unique<SourcePipeline>(startBitrate, minBitrate);
-        p->sourceId = uint8_t(i);
-        p->target = sources[i].target;
-        p->name = sources[i].name;
+        p->sourceId = nextSourceId++;
+        p->target = s.target;
+        p->name = s.name;
         pipes.push_back(std::move(p));
-    }
+        return pipes.back().get();
+    };
+    for (const AgentSource& s : sources) makePipeline(s);
 
-    // --- Khởi động capture cho từng nguồn ---
-    for (auto& up : pipes) {
-        SourcePipeline* p = up.get();
-
+    // Nối chuỗi capture→encode→gửi cho MỘT nguồn rồi khởi động capture. Tách thành
+    // hàm vì được gọi ở HAI chỗ: các nguồn ban đầu ngay dưới đây, và nguồn thêm
+    // giữa phiên khi người dùng bấm Add trên cửa sổ phiên (trong vòng Recv).
+    auto startPipeline = [&sock, &gpu, &opt](SourcePipeline* p) {
         // NAL vừa nén xong (thread FrameArrived của nguồn này) -> cắt gói -> UDP.
         auto onPacket = [p, &sock](const uint8_t* data, size_t size, uint64_t tsUs,
                             bool keyframe) {
@@ -465,10 +494,38 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                 p->name.c_str());
             p->failed.store(true);
         }
-    }
+    };
+
+    // Tắt hẳn MỘT nguồn: nút Stop selected, nguồn thêm vào mà không lên hình,
+    // hoặc dọn dẹp cuối phiên. Idempotent (shutdownDone) — dọn cuối phiên gọi lại
+    // trên nguồn đã tắt giữa chừng là no-op. CHỈ gọi từ thread Recv.
+    auto shutdownPipeline = [&sock](SourcePipeline* p) {
+        if (p->shutdownDone) return;
+        p->shutdownDone = true;
+        p->injector.ReleaseAll(); // tắt giữa lúc client đang giữ phím -> nhả ra
+        // Chia tay tử tế: báo BYE cho client nếu còn phiên.
+        if (p->session && p->session->state() != deskhub::HostSession::State::Idle) {
+            const uint64_t pp = p->peerPacked.load();
+            if (pp) {
+                uint8_t bye[deskhub::kCommonHeaderSize];
+                const size_t bn = deskhub::BuildBye(bye, p->session->sessionId());
+                if (bn) sock.SendTo(NetAddr::Unpack(pp), bye, bn);
+            }
+        }
+        p->capture.Stop(); // hết callback rồi mới dọn encoder
+        {
+            std::lock_guard<std::mutex> lk(p->encMutex);
+            if (p->encoder) p->encoder->Finish();
+        }
+        p->netReady.store(false);
+        p->failed.store(true); // mọi vòng lặp coi nguồn này như đã chết
+    };
+
+    // --- Khởi động capture cho từng nguồn ---
+    for (auto& up : pipes) startPipeline(up.get());
 
     // --- Đợi frame đầu của từng nguồn để biết kích thước (offer trong HELLO_ACK) ---
-    for (int i = 0; i < 1000 && !g_ctrlC.load(); ++i) {
+    for (int i = 0; i < 1000 && !g_ctrlC.load() && !ui.stopRequested(); ++i) {
         bool allKnown = true;
         for (auto& p : pipes)
             if (!p->failed.load() && !p->srcW.load() && !p->capture.Closed()) allKnown = false;
@@ -483,8 +540,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             if (!p->failed.load())
                 std::printf("[Agent][%s] No frame within 10s — not sharing this source.\n",
                     p->name.c_str());
-            p->capture.Stop();
-            p->failed.store(true);
+            shutdownPipeline(p.get());
             continue;
         }
         live.push_back(p.get());
@@ -495,8 +551,10 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
     }
 
     // --- Dựng phiên + injector cho từng nguồn còn sống ---
+    // Tách thành hàm vì cũng được gọi ở HAI chỗ: các nguồn ban đầu ngay dưới, và
+    // nguồn thêm giữa phiên (trong vòng Recv, khi frame đầu của nó về).
     NetAddr replyAddr; // địa chỉ nguồn của gói đang xử lý (chỉ thread Recv dùng)
-    for (SourcePipeline* p : live) {
+    auto attachSession = [&](SourcePipeline* p) {
         p->offer.width = uint16_t(p->srcW.load());
         p->offer.height = uint16_t(p->srcH.load());
         p->offer.fps = uint8_t(opt.fps);
@@ -577,7 +635,38 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
 
         p->session = std::make_unique<deskhub::HostSession>(cb, p->offer);
         p->netReady.store(true, std::memory_order_release);
-    }
+    };
+    for (SourcePipeline* p : live) attachSession(p);
+
+    // Nguồn thêm giữa phiên (nút Add): capture đã chạy, đang đợi frame đầu để
+    // biết kích thước rồi mới attachSession được. pair = (pipeline, hạn chót µs).
+    std::vector<std::pair<SourcePipeline*, uint64_t>> pendingAdds;
+
+    // Đẩy danh sách nguồn hiện tại cho cửa sổ phiên. SetRows tự so sánh với lần
+    // trước nên gọi lại mỗi giây cũng không làm listbox nhấp nháy.
+    auto publishRows = [&] {
+        std::vector<SessionSourceRow> rows;
+        for (SourcePipeline* p : live) {
+            if (p->failed.load() || p->capture.Closed()) continue;
+            SessionSourceRow r;
+            r.sourceId = p->sourceId;
+            wchar_t suffix[64];
+            swprintf(suffix, 64, L"  (%ux%u%ls)", p->srcW.load(), p->srcH.load(),
+                p->peerPacked.load(std::memory_order_relaxed) ? L", viewer connected"
+                                                              : L"");
+            r.label = FromUtf8(p->name) + suffix;
+            rows.push_back(std::move(r));
+        }
+        for (const auto& pr : pendingAdds) {
+            SessionSourceRow r;
+            r.sourceId = pr.first->sourceId;
+            r.pending = true;
+            r.label = FromUtf8(pr.first->name) + L"  (starting...)";
+            rows.push_back(std::move(r));
+        }
+        ui.SetRows(std::move(rows));
+    };
+    publishRows();
 
     if (opt.allowInput) {
         // UIPI nuốt SendInput IM LẶNG khi đích chạy ở mức toàn vẹn cao hơn (game có
@@ -611,11 +700,79 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
 
     for (;;) {
         if (g_ctrlC.load()) break;
-        // Dừng khi MỌI nguồn đã đóng/hỏng — một cửa sổ đóng không nên giết cả phiên.
-        bool anyAlive = false;
+        if (ui.stopRequested()) break; // nút Stop sharing / đóng cửa sổ phiên
+
+        // --- Lệnh từ cửa sổ phiên: thêm nguồn (nút Add) ---
+        bool rosterChanged = false;
+        for (AgentSource& s : ui.TakeAdds()) {
+            // Trần kMaxSources tính trên nguồn CÒN SỐNG + đang chờ, không phải
+            // tổng đã từng share — tắt bớt rồi thêm lại thoải mái.
+            size_t aliveCnt = pendingAdds.size();
+            for (SourcePipeline* q : live)
+                if (!q->failed.load() && !q->capture.Closed()) ++aliveCnt;
+            if (aliveCnt >= deskhub::kMaxSources) {
+                std::printf("[Agent] Cannot add \"%s\": already sharing %zu sources.\n",
+                    s.name.c_str(), aliveCnt);
+                continue;
+            }
+            SourcePipeline* p = makePipeline(s);
+            startPipeline(p);
+            std::printf(
+                "[Agent][%s] Added from the session window — waiting for"
+                " first frame.\n",
+                p->name.c_str());
+            // Start hỏng thì failed đã bật — vòng pending dưới sẽ không bao giờ
+            // thấy nó, nên đừng cho vào danh sách chờ.
+            if (!p->failed.load())
+                pendingAdds.push_back({p, NowUs() + 10'000'000ull});
+            rosterChanged = true;
+        }
+
+        // --- Lệnh từ cửa sổ phiên: tắt bớt nguồn (nút Stop selected) ---
+        for (uint8_t id : ui.TakeRemoves()) {
+            for (auto& up : pipes) {
+                if (up->sourceId != id || up->shutdownDone) continue;
+                std::printf("[Agent][%s] Stopped from the session window.\n",
+                    up->name.c_str());
+                shutdownPipeline(up.get());
+                rosterChanged = true;
+            }
+        }
+
+        // --- Nguồn đang chờ: frame đầu về thì vào phiên, quá hạn/hỏng thì bỏ ---
+        for (auto it = pendingAdds.begin(); it != pendingAdds.end();) {
+            SourcePipeline* p = it->first;
+            if (p->failed.load()) { // startPipeline hỏng muộn, hoặc vừa bị Stop selected
+                it = pendingAdds.erase(it);
+                rosterChanged = true;
+                continue;
+            }
+            if (p->srcW.load()) {
+                attachSession(p);
+                live.push_back(p);
+                it = pendingAdds.erase(it);
+                rosterChanged = true;
+                continue;
+            }
+            if (NowUs() > it->second) {
+                std::printf("[Agent][%s] No frame within 10s — not sharing this source.\n",
+                    p->name.c_str());
+                shutdownPipeline(p);
+                it = pendingAdds.erase(it);
+                rosterChanged = true;
+                continue;
+            }
+            ++it;
+        }
+        if (rosterChanged) publishRows();
+
+        // Hết nguồn sống: còn cửa sổ phiên thì GIỮ phiên chạy (người dùng còn nút
+        // Add để thêm nguồn mới); không có UI (tạo cửa sổ hỏng) thì giữ hành vi
+        // cũ — mọi nguồn đóng là hết phiên.
+        bool anyAlive = !pendingAdds.empty();
         for (SourcePipeline* p : live)
             if (!p->failed.load() && !p->capture.Closed()) anyAlive = true;
-        if (!anyAlive) break;
+        if (!anyAlive && !ui.active()) break;
 
         NetAddr from;
         const int n = sock.RecvFrom(buf, sizeof(buf), from);
@@ -775,6 +932,10 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             // Sức khỏe thread Recv (H3), chung cho mọi nguồn.
             std::printf("[DIAG][agent] evt=sum loop_busy_ms_max=%u\n", dgLoopBusyMaxMs);
             dgLoopBusyMaxMs = 0;
+            // Làm mới danh sách trên cửa sổ phiên theo nhịp 1s: bắt các thay đổi
+            // không đi qua lệnh của người dùng (nguồn đổi kích thước, cửa sổ được
+            // share bị đóng, client vào/ra). SetRows tự bỏ qua khi không đổi.
+            publishRows();
             lastStatUs = now;
         }
 
@@ -787,29 +948,17 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
     }
 
     // --- Dọn dẹp ---
+    // Quét TOÀN BỘ pipes chứ không riêng live: nguồn đang chờ frame đầu và nguồn
+    // đã tắt giữa phiên đều nằm ngoài live; shutdownPipeline idempotent nên nguồn
+    // nào dọn rồi chỉ là no-op, còn tổng kết thì tính cả nguồn đã tắt giữa chừng.
     uint64_t totalFrames = 0;
     double totalMB = 0;
-    for (SourcePipeline* p : live) {
-        p->injector.ReleaseAll(); // thoát giữa lúc client đang giữ phím -> nhả ra
-
-        // Chia tay tử tế: báo BYE cho client nếu còn phiên.
-        if (p->session->state() != deskhub::HostSession::State::Idle) {
-            const uint64_t pp = p->peerPacked.load();
-            if (pp) {
-                uint8_t bye[deskhub::kCommonHeaderSize];
-                const size_t bn = deskhub::BuildBye(bye, p->session->sessionId());
-                if (bn) sock.SendTo(NetAddr::Unpack(pp), bye, bn);
-            }
-        }
-        p->capture.Stop(); // hết callback rồi mới dọn encoder
-        {
-            std::lock_guard<std::mutex> lk(p->encMutex);
-            if (p->encoder) p->encoder->Finish();
-        }
-        p->netReady.store(false);
-        totalFrames += p->framesSent.load();
-        totalMB += p->bytesSent.load() / 1e6;
+    for (auto& up : pipes) {
+        shutdownPipeline(up.get());
+        totalFrames += up->framesSent.load();
+        totalMB += up->bytesSent.load() / 1e6;
     }
+    ui.Stop();
     std::printf("[Agent] Stopped. Total: %llu frames sent, %.2f MB.\n",
         (unsigned long long)totalFrames, totalMB);
     SetConsoleCtrlHandler(CtrlHandler, FALSE);

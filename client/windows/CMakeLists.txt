@@ -54,6 +54,8 @@ add_executable(client WIN32
     ui/MainMenuWindow.cpp
     ui/WindowPickerDialog.cpp
     ui/SourcePickerDialog.cpp
+    ui/SessionWindow.cpp
+    ui/ViewerWindow.cpp
 )
 
 target_compile_definitions(client PRIVATE UNICODE _UNICODE)

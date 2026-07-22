@@ -37,3 +37,9 @@
 // nghĩa khi trả về true.
 bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
     bool& outAllowInput);
+
+// Biến thể "thêm nguồn GIỮA PHIÊN" (nút Add của cửa sổ phiên — SessionWindow):
+// cùng danh sách, nhưng KHÔNG có checkbox điều khiển — quyền điều khiển là
+// quyết định một lần cho cả phiên, đã chốt lúc bấm Share (đổi giữa chừng còn
+// kéo theo cả chuyện nâng quyền UAC). Nút xác nhận đề "Add" thay vì "Share".
+bool ShowWindowPickerAddDialog(HWND owner, std::vector<AgentSource>& outSources);

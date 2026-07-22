@@ -147,7 +147,9 @@ void Confirm(PickerState& st) {
         return;
     }
 
-    st.allowInput = SendMessageW(st.chkAllow, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    // Biến thể Add không có checkbox (chkAllow null) — giá trị không được dùng.
+    if (st.chkAllow)
+        st.allowInput = SendMessageW(st.chkAllow, BM_GETCHECK, 0, 0) == BST_CHECKED;
     st.done = true;
 }
 
@@ -175,10 +177,11 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(h, msg, wp, lp);
 }
 
-} // namespace
-
-bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
-    bool& outAllowInput) {
+// Phần dùng chung của hai cửa ngõ public. `addMode` = mở từ nút Add của cửa sổ
+// phiên: đổi tiêu đề + nhãn nút xác nhận và BỎ checkbox điều khiển (lý do ở
+// WindowPickerDialog.h).
+bool RunPicker(HWND owner, bool addMode, std::vector<AgentSource>& outSources,
+    bool* outAllowInput) {
     WNDCLASSW wc{};
     wc.lpfnWndProc = WndProc;
     wc.hInstance = GetModuleHandleW(nullptr);
@@ -200,7 +203,8 @@ bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
     RECT wr{0, 0, kW, kH};
     AdjustWindowRect(&wr, style, FALSE);
     HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, kWndClass,
-        L"Select what to share (screens and/or windows)",
+        addMode ? L"Add screens/windows to the current share"
+                : L"Select what to share (screens and/or windows)",
         style, x, y, wr.right - wr.left, wr.bottom - wr.top,
         owner, nullptr, wc.hInstance, nullptr);
     if (!dlg) return false;
@@ -224,11 +228,14 @@ bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
         12, 12, kW - 24, kH - 122, kIdList);
     mk(L"STATIC", L"Click each screen or window you want to share (you can pick several).",
         0, 12, kH - 104, kW - 24, 18, kIdHint);
-    st.chkAllow = mk(L"BUTTON", L"Allow the other person to control mouse/keyboard",
-        BS_AUTOCHECKBOX, 12, kH - 82, kW - 24, 20, kIdChkAllow);
-    SendMessageW(st.chkAllow, BM_SETCHECK, BST_CHECKED, 0);
+    if (!addMode) {
+        st.chkAllow = mk(L"BUTTON", L"Allow the other person to control mouse/keyboard",
+            BS_AUTOCHECKBOX, 12, kH - 82, kW - 24, 20, kIdChkAllow);
+        SendMessageW(st.chkAllow, BM_SETCHECK, BST_CHECKED, 0);
+    }
     mk(L"BUTTON", L"Refresh", 0, 12, kH - 52, 90, 26, kIdRefresh);
-    mk(L"BUTTON", L"Share", BS_DEFPUSHBUTTON, kW - 24 - 180, kH - 52, 86, 26, kIdOk);
+    mk(L"BUTTON", addMode ? L"Add" : L"Share", BS_DEFPUSHBUTTON,
+        kW - 24 - 180, kH - 52, 86, 26, kIdOk);
     mk(L"BUTTON", L"Cancel", 0, kW - 24 - 88, kH - 52, 86, 26, kIdCancel);
 
     Repopulate(st);
@@ -237,7 +244,7 @@ bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
     SetForegroundWindow(dlg);
 
     MSG msg;
-    BOOL got;
+    BOOL got = TRUE;
     while (!st.done && (got = GetMessageW(&msg, nullptr, 0, 0)) != 0) {
         if (got == -1) break;
         if (!IsDialogMessageW(dlg, &msg)) {
@@ -245,6 +252,10 @@ bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
             DispatchMessageW(&msg);
         }
     }
+    // WM_QUIT không phải của hộp thoại này — nó dành cho vòng bơm NGOÀI (thread
+    // quản lý phiên kết thúc trong lúc hộp thoại đang mở). Trả lại, không thì
+    // vòng ngoài chặn ở GetMessage vĩnh viễn và join() thread đó bị treo.
+    if (got == 0) PostQuitMessage(0);
 
     if (owner) {
         EnableWindow(owner, TRUE);
@@ -253,6 +264,17 @@ bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
     DestroyWindow(dlg);
 
     outSources = std::move(st.result);
-    outAllowInput = st.allowInput;
+    if (outAllowInput) *outAllowInput = st.allowInput;
     return !outSources.empty();
+}
+
+} // namespace
+
+bool ShowWindowPickerDialog(HWND owner, std::vector<AgentSource>& outSources,
+    bool& outAllowInput) {
+    return RunPicker(owner, false, outSources, &outAllowInput);
+}
+
+bool ShowWindowPickerAddDialog(HWND owner, std::vector<AgentSource>& outSources) {
+    return RunPicker(owner, true, outSources, nullptr);
 }

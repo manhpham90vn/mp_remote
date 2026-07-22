@@ -156,7 +156,7 @@ bool ShowSourcePickerDialog(HWND owner, const std::vector<deskhub::SourceInfo>& 
     SetForegroundWindow(dlg);
 
     MSG msg;
-    BOOL got;
+    BOOL got = TRUE;
     while (!st.done && (got = GetMessageW(&msg, nullptr, 0, 0)) != 0) {
         if (got == -1) break;
         if (!IsDialogMessageW(dlg, &msg)) {
@@ -164,6 +164,10 @@ bool ShowSourcePickerDialog(HWND owner, const std::vector<deskhub::SourceInfo>& 
             DispatchMessageW(&msg);
         }
     }
+    // WM_QUIT không phải của hộp thoại này — nó dành cho vòng bơm NGOÀI (thread
+    // quản lý phiên kết thúc trong lúc hộp thoại đang mở). Trả lại, không thì
+    // vòng ngoài chặn ở GetMessage vĩnh viễn và join() thread đó bị treo.
+    if (got == 0) PostQuitMessage(0);
 
     if (owner) {
         EnableWindow(owner, TRUE);

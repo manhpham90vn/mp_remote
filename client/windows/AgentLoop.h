@@ -9,7 +9,10 @@
 //
 // VỊ TRÍ TRONG KIẾN TRÚC
 //   MainMenuWindow → WindowPickerDialog → **RunAgent()**
-//   RunAgent CHẶN tới khi mọi nguồn đóng / Ctrl+C / lỗi, rồi trả exit code.
+//   RunAgent CHẶN tới khi người dùng kết thúc phiên / Ctrl+C / lỗi, rồi trả exit
+//   code. Trong lúc chạy nó mở một cửa sổ quản lý phiên (ui/SessionWindow.h):
+//   `sources` chỉ là danh sách BAN ĐẦU — người dùng thêm/bớt nguồn giữa phiên
+//   bằng các nút Add / Stop selected trên cửa sổ đó.
 //
 // GĐ6: NHIỀU NGUỒN, MỘT CỔNG
 //   Chia sẻ nhiều cửa sổ và/hoặc cả màn hình cùng lúc trên MỘT cổng UDP. Mỗi nguồn
@@ -44,6 +47,7 @@ struct AgentSource {
     std::string name;
 };
 
-// Chạy agent phục vụ `sources` tới khi mọi nguồn đóng / Ctrl+C / lỗi.
+// Chạy agent phục vụ `sources` (danh sách ban đầu — thêm/bớt giữa phiên qua cửa
+// sổ quản lý) tới khi người dùng kết thúc phiên / Ctrl+C / lỗi.
 // Trả về exit code cho main.
 int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt);

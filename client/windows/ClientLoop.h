@@ -9,7 +9,10 @@
 //
 // VỊ TRÍ TRONG LUỒNG NGƯỜI DÙNG
 //   MainMenuWindow (gõ IP) → QueryHostSources() → SourcePickerDialog → RunClient()
-//   RunClient CHẶN tới khi người dùng đóng hết cửa sổ preview / Ctrl+C / mất kết nối.
+//   RunClient CHẶN tới khi người dùng ngắt kết nối / Ctrl+C. Trong lúc chạy nó mở
+//   một cửa sổ quản lý phiên xem (ui/ViewerWindow.h) hiện danh sách nguồn host
+//   đang chia sẻ: `sources` chỉ là danh sách BAN ĐẦU — giữa phiên bấm Refresh để
+//   hỏi lại host rồi View / Stop từng nguồn ngay trên đó.
 //
 // GĐ6: XEM NHIỀU NGUỒN CÙNG LÚC
 //   Mỗi nguồn là một phiên HOÀN TOÀN độc lập: socket riêng, ClientSession riêng,
@@ -46,6 +49,7 @@ struct ClientOptions {
 // (sai IP, firewall chặn, hoặc host bản cũ không biết LIST_SOURCES).
 bool QueryHostSources(const NetAddr& server, std::vector<deskhub::SourceInfo>& out);
 
-// Kết nối tới agent, hiện video tới khi người dùng đóng hết cửa sổ preview /
-// Ctrl+C / mất kết nối. Trả về exit code cho main.
+// Kết nối tới agent, hiện video tới khi người dùng ngắt kết nối (nút Disconnect
+// trên cửa sổ quản lý, hoặc đóng hết preview khi không có cửa sổ đó) / Ctrl+C.
+// Trả về exit code cho main.
 int RunClient(const ClientOptions& opt);
