@@ -106,17 +106,17 @@ private:
     std::mutex m_;
     std::vector<SessionSourceRow> rows_; // Main ghi (nguồn đang xem), UI chép khi dirty
     bool dirty_ = false;
-    std::vector<deskhub::SourceInfo> adds_; // UI ghi, Main rút
-    std::vector<uint8_t> removes_;          // UI ghi, Main rút
+    std::vector<deskhub::SourceInfo> adds_;        // UI ghi, Main rút
+    std::vector<uint8_t> removes_;                 // UI ghi, Main rút
     std::vector<deskhub::SourceInfo> queryResult_; // thread hỏi host ghi, UI chép
     bool queryOk_ = false;
 
     // --- Chỉ thread UI chạm ---
-    std::vector<SessionSourceRow> uiViewRows_;    // nguồn đang xem (bản UI)
-    std::vector<deskhub::SourceInfo> hostList_;   // danh sách host trả về lần Refresh cuối
-    bool refreshing_ = false;                     // nút Refresh đang khoá
-    bool manualRefresh_ = false;                  // chỉ báo lỗi khi người dùng tự bấm
-    bool everRefreshed_ = false;                  // đã có kết quả lần nào chưa (placeholder)
+    std::vector<SessionSourceRow> uiViewRows_;  // nguồn đang xem (bản UI)
+    std::vector<deskhub::SourceInfo> hostList_; // danh sách host trả về lần Refresh cuối
+    bool refreshing_ = false;                   // nút Refresh đang khoá
+    bool manualRefresh_ = false;                // chỉ báo lỗi khi người dùng tự bấm
+    bool everRefreshed_ = false;                // đã có kết quả lần nào chưa (placeholder)
     HWND list_ = nullptr;
     HWND btnRefresh_ = nullptr;
 

@@ -205,8 +205,8 @@ LRESULT ViewerWindow::HandleMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 case kIdView: {
                     const LRESULT cur = SendMessageW(list_, LB_GETCURSEL, 0, 0);
                     const LONG_PTR id = cur == LB_ERR
-                        ? -1
-                        : (LONG_PTR)SendMessageW(list_, LB_GETITEMDATA, (WPARAM)cur, 0);
+                                            ? -1
+                                            : (LONG_PTR)SendMessageW(list_, LB_GETITEMDATA, (WPARAM)cur, 0);
                     if (id < 0) {
                         MessageBoxW(h, L"Select a source in the list first.",
                             L"Deskhub", MB_OK | MB_ICONINFORMATION);
@@ -232,8 +232,8 @@ LRESULT ViewerWindow::HandleMsg(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 case kIdStopSel: {
                     const LRESULT cur = SendMessageW(list_, LB_GETCURSEL, 0, 0);
                     const LONG_PTR id = cur == LB_ERR
-                        ? -1
-                        : (LONG_PTR)SendMessageW(list_, LB_GETITEMDATA, (WPARAM)cur, 0);
+                                            ? -1
+                                            : (LONG_PTR)SendMessageW(list_, LB_GETITEMDATA, (WPARAM)cur, 0);
                     if (id < 0) {
                         MessageBoxW(h, L"Select a source in the list first.",
                             L"Deskhub", MB_OK | MB_ICONINFORMATION);
