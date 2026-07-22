@@ -5,15 +5,27 @@
 //   Cửa sổ và các control đều tạo bằng CreateWindowExW trong mã. Đổi lại việc phải
 //   tự tính toạ độ, ta được: không phụ thuộc thư viện ngoài, không có bước biên
 //   dịch tài nguyên, và file exe chạy độc lập không cần cài gì. Với một giao diện
-//   chỉ vài ô nhập và bốn nút thì đó là đánh đổi đúng.
+//   chỉ vài ô nhập và ít nút thì đó là đánh đổi đúng.
+//
+// HAI HỘP: HOST MODE và CLIENT MODE
+//   Màn hình chia làm hai group box tách bạch để người dùng biết ngay mình đang làm
+//   vai nào:
+//     • "Host mode"   — chia sẻ máy này: hiện địa chỉ IP (kèm nút Copy), các thông
+//                       số Port/FPS/Bitrate, và nút Share.
+//     • "Client mode" — kết nối tới máy khác: ô nhập ip[:port], tuỳ chọn View only,
+//                       và nút Connect.
+//   Hai tuỳ chọn dùng chung (log chẩn đoán) và nút Exit nằm dưới cùng, ngoài hai hộp.
+//   Port nằm TRONG hộp host = cổng máy này lắng nghe; phía client lấy cổng từ chính
+//   ô địa chỉ ip[:port] nên hai vai không còn dùng lẫn một ô Port như trước.
 //
 // KHUÔN MẪU: CÁC HẰNG kId*
 //   Mỗi control có một id số nguyên; WM_COMMAND báo về kèm id đó để biết ai vừa
-//   được bấm. Gom hằng lên đầu file thay vì rải số trong mã.
+//   được bấm. Gom hằng lên đầu file thay vì rải số trong mã. Các nút Copy dùng dải
+//   id liên tiếp từ kIdCopyBase để một chỗ xử lý được mọi dòng IP.
 //
 // ĐƯỜNG RẼ HAI VAI
-//   Nút Chia sẻ  → WindowPickerDialog → RunAgent()  (chặn tới khi phiên kết thúc)
-//   Nút Kết nối  → QueryHostSources → SourcePickerDialog → RunClient()
+//   Nút Share   → WindowPickerDialog → RunAgent()  (chặn tới khi phiên kết thúc)
+//   Nút Connect → QueryHostSources → SourcePickerDialog → RunClient()
 //   Cả hai đều CHẶN: cửa sổ chính đứng yên trong lúc phiên chạy, và hiện lại khi
 //   phiên kết thúc. Đơn giản hơn nhiều so với chạy nền, và đúng với thực tế người
 //   dùng chỉ làm một việc tại một thời điểm.
@@ -26,6 +38,7 @@
 #include "ui/MainMenuWindow.h"
 
 #include <cstdlib>
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -51,6 +64,8 @@ constexpr int kIdConnect     = 203;
 constexpr int kIdChkViewOnly = 204;
 constexpr int kIdExit        = 205;
 constexpr int kIdChkSaveLog  = 206;
+// Dải id cho các nút Copy: một dòng IP một nút, id = kIdCopyBase + chỉ số dòng.
+constexpr int kIdCopyBase    = 300;
 
 // Giá trị mặc định khi ô trống/nhập sai - giống hệt mặc định --port/--fps/
 // --bitrate cũ.
@@ -72,6 +87,23 @@ uint32_t GetEditUint(HWND edit, uint32_t fallback) {
     return v > 0 ? (uint32_t)v : fallback;
 }
 
+// Đặt một chuỗi Unicode lên clipboard. Nếu SetClipboardData thành công thì hệ thống
+// tiếp quản khối nhớ, ta không giải phóng nữa; ngược lại phải tự GlobalFree.
+void CopyTextToClipboard(HWND owner, const std::wstring& text) {
+    if (text.empty() || !OpenClipboard(owner)) return;
+    EmptyClipboard();
+    const size_t bytes = (text.size() + 1) * sizeof(wchar_t);
+    if (HGLOBAL h = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+        if (void* p = GlobalLock(h)) {
+            memcpy(p, text.c_str(), bytes);
+            GlobalUnlock(h);
+            if (SetClipboardData(CF_UNICODETEXT, h)) h = nullptr; // clipboard sở hữu khối nhớ
+        }
+        if (h) GlobalFree(h);
+    }
+    CloseClipboard();
+}
+
 struct MenuState {
     HWND hwnd = nullptr;
     HWND editPort = nullptr;
@@ -80,6 +112,7 @@ struct MenuState {
     HWND editAddr = nullptr;
     HWND chkViewOnly = nullptr;
     HWND chkSaveLog = nullptr;
+    std::vector<std::wstring> copyIps; // IP mỗi dòng, song song với các nút Copy
     bool quit = false;
 };
 
@@ -164,9 +197,10 @@ void DoConnect(MenuState& st) {
     addr.reserve(waddr.size());
     for (wchar_t c : waddr) addr.push_back(char(c));
 
-    const uint16_t port = uint16_t(GetEditUint(st.editPort, kDefaultPort));
+    // Cổng để kết nối lấy từ chính ô địa chỉ (ip:port); không gõ port thì dùng mặc
+    // định. Vai client không còn phụ thuộc ô Port của hộp host.
     ClientOptions co;
-    if (!ParseNetAddr(addr, port, co.server)) {
+    if (!ParseNetAddr(addr, kDefaultPort, co.server)) {
         const std::wstring msg = L"Invalid address: \"" + waddr +
             L"\"\n(e.g., 192.168.1.10 or 192.168.1.10:47777)";
         MessageBoxW(st.hwnd, msg.c_str(), L"RemoteGame", MB_OK | MB_ICONERROR);
@@ -198,14 +232,21 @@ void DoConnect(MenuState& st) {
 LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     auto* st = (MenuState*)GetWindowLongPtrW(h, GWLP_USERDATA);
     switch (msg) {
-    case WM_COMMAND:
+    case WM_COMMAND: {
         if (!st) break;
-        switch (LOWORD(wp)) {
-        case kIdShare:   DoShare(*st);   return 0;
-        case kIdConnect: DoConnect(*st); return 0;
+        const int id = LOWORD(wp);
+        // Nút Copy: id nằm trong dải liên tiếp, quy về chỉ số dòng IP tương ứng.
+        if (id >= kIdCopyBase && id < kIdCopyBase + (int)st->copyIps.size()) {
+            CopyTextToClipboard(st->hwnd, st->copyIps[size_t(id - kIdCopyBase)]);
+            return 0;
+        }
+        switch (id) {
+        case kIdShare:   DoShare(*st);    return 0;
+        case kIdConnect: DoConnect(*st);  return 0;
         case kIdExit:    st->quit = true; return 0;
         }
         break;
+    }
     case WM_CLOSE:
         if (st) st->quit = true;
         return 0;
@@ -227,7 +268,32 @@ int RunMainMenuWindow() {
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     RegisterClassW(&wc);
 
-    constexpr int kW = 460, kH = 424; // +24: checkbox lưu log ở dưới View only
+    MenuState st;
+
+    // Địa chỉ IPv4 của máy này - biết trước số dòng để tính chiều cao hộp host và
+    // cả cửa sổ (mỗi adapter một dòng kèm nút Copy).
+    const auto addrs = ListLocalIPv4();
+    const int nRows = addrs.empty() ? 1 : (int)addrs.size();
+
+    // --- Bố cục: hai group box xếp dọc, dưới cùng là tuỳ chọn chung + Exit ---
+    constexpr int kW = 496;
+    const int gx = 12;             // lề trái của group box
+    const int gw = kW - 24;        // bề rộng group box
+    const int ix = gx + 14;        // lề trái nội dung bên trong hộp
+    const int iw = gw - 28;        // bề rộng nội dung bên trong hộp
+    const int rowH = 22;           // cao mỗi dòng IP
+
+    // Chiều cao hộp host phụ thuộc số dòng IP; hộp client cố định.
+    const int hostTop = 8;
+    const int settingsRel = 44 + nRows * rowH + 8;   // hàng Port/FPS/Bitrate (theo hostTop)
+    const int shareRel    = settingsRel + 34;         // nút Share
+    const int hostH       = shareRel + 32 + 12;
+    const int clientTop   = hostTop + hostH + 10;
+    const int clientH     = 118;
+    const int saveLogY    = clientTop + clientH + 12;
+    const int exitY       = saveLogY + 30;
+    const int kH          = exitY + 44;
+
     const DWORD style = WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
     RECT wr{ 0, 0, kW, kH };
     AdjustWindowRect(&wr, style, FALSE);
@@ -237,7 +303,6 @@ int RunMainMenuWindow() {
                                  nullptr, nullptr, wc.hInstance, nullptr);
     if (!hwnd) return 1;
 
-    MenuState st;
     st.hwnd = hwnd;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)&st);
 
@@ -249,51 +314,75 @@ int RunMainMenuWindow() {
         return c;
     };
 
-    // Địa chỉ IP máy này - mỗi adapter một dòng, kèm port để đọc cho máy kia gõ.
-    // Dòng port hiển thị lấy giá trị mặc định ban đầu; sửa ở Port ở dưới sẽ áp
-    // dụng cho phiên Chia sẻ/Kết nối tiếp theo (không tự cập nhật dòng này).
-    std::wstring addrText = L"THIS MACHINE's address (read aloud for the other person to type):\r\n";
-    const auto addrs = ListLocalIPv4();
+    // Group box phải tạo TRƯỚC các control con để con vẽ đè lên khung (control tạo
+    // sau nằm trên trong z-order).
+    mk(L"BUTTON", L"Host mode - share an application on THIS machine",
+       BS_GROUPBOX, gx, hostTop, gw, hostH, 0);
+
+    // Địa chỉ máy này: đọc/copy cho người bên kia gõ vào ô Connect của họ. Cổng hiển
+    // thị là mặc định; đổi ô Port bên dưới không tự cập nhật dòng này (nút Copy cũng
+    // chỉ copy IP, không kèm cổng).
+    mk(L"STATIC", L"Others connect to you using one of these addresses:",
+       SS_LEFT, ix, hostTop + 22, iw, 16, 0);
+
+    constexpr int kCopyW = 60, kCopyH = 20;
+    const int copyX = gx + gw - 14 - kCopyW;
     if (addrs.empty()) {
-        addrText += L"(no network address found)";
+        mk(L"STATIC", L"(no network address found)", SS_LEFT,
+           ix, hostTop + 44, iw, 18, 0);
     } else {
+        st.copyIps.reserve(addrs.size());
+        int i = 0;
         for (const auto& a : addrs) {
-            wchar_t line[160];
+            const int rowY = hostTop + 44 + i * rowH;
             std::wstring wip(a.ip.begin(), a.ip.end());
-            swprintf(line, 160, L"  %-22ls %ls:%u\r\n", a.name.c_str(), wip.c_str(), kDefaultPort);
-            addrText += line;
+            wchar_t line[192];
+            swprintf(line, 192, L"%-20ls %ls:%u", a.name.c_str(), wip.c_str(), kDefaultPort);
+            mk(L"STATIC", line, SS_LEFT | SS_ENDELLIPSIS,
+               ix, rowY + 2, copyX - 8 - ix, 18, 0);
+            mk(L"BUTTON", L"Copy", BS_PUSHBUTTON,
+               copyX, rowY, kCopyW, kCopyH, kIdCopyBase + i);
+            st.copyIps.push_back(std::move(wip)); // Copy chỉ lấy IP, không kèm cổng
+            ++i;
         }
     }
-    mk(L"STATIC", addrText.c_str(), SS_LEFT, 16, 12, kW - 32, 92, 0);
 
-    // Port / FPS / Bitrate - trước đây chỉ sửa được bằng cờ dòng lệnh.
-    mk(L"STATIC", L"Port", SS_LEFT, 16, 118, 40, 20, 0);
+    // Thông số phía host: Port máy này lắng nghe + FPS + Bitrate của luồng gửi đi.
+    const int sy = hostTop + settingsRel;
+    mk(L"STATIC", L"Port", SS_LEFT, ix, sy + 3, 32, 18, 0);
     st.editPort = mk(L"EDIT", L"47777", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
-                      54, 116, 70, 24, kIdEditPort);
-    mk(L"STATIC", L"FPS", SS_LEFT, 144, 118, 32, 20, 0);
+                      ix + 36, sy, 64, 24, kIdEditPort);
+    mk(L"STATIC", L"FPS", SS_LEFT, ix + 116, sy + 3, 30, 18, 0);
     st.editFps = mk(L"EDIT", L"60", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
-                     176, 116, 50, 24, kIdEditFps);
-    mk(L"STATIC", L"Bitrate (Mbps)", SS_LEFT, 244, 118, 92, 20, 0);
+                     ix + 148, sy, 48, 24, kIdEditFps);
+    mk(L"STATIC", L"Bitrate (Mbps)", SS_LEFT, ix + 212, sy + 3, 90, 18, 0);
     st.editBitrate = mk(L"EDIT", L"20", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
-                         338, 116, 50, 24, kIdEditBitrate);
+                         ix + 304, sy, 48, 24, kIdEditBitrate);
 
-    mk(L"BUTTON", L"Share an application on this machine (act as host)", BS_PUSHBUTTON,
-       16, 156, kW - 32, 32, kIdShare);
+    mk(L"BUTTON", L"Share...  (pick screens/windows to share)", BS_PUSHBUTTON,
+       ix, hostTop + shareRel, iw, 32, kIdShare);
 
-    mk(L"STATIC", L"Connect to another machine (ip[:port]):", SS_LEFT, 16, 204, kW - 32, 18, 0);
-    st.editAddr = mk(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL, 16, 224, kW - 32 - 110, 26, kIdEditAddr);
-    mk(L"BUTTON", L"Connect", BS_DEFPUSHBUTTON, kW - 16 - 100, 224, 100, 26, kIdConnect);
+    // --- Hộp client: kết nối tới một máy khác ---
+    mk(L"BUTTON", L"Client mode - connect to ANOTHER machine",
+       BS_GROUPBOX, gx, clientTop, gw, clientH, 0);
 
-    st.chkViewOnly = mk(L"BUTTON", L"View only, don't send input (applies when connecting)",
-                         BS_AUTOCHECKBOX, 16, 262, kW - 32, 20, kIdChkViewOnly);
+    mk(L"STATIC", L"Host machine address (ip[:port]):", SS_LEFT,
+       ix, clientTop + 24, iw, 16, 0);
+    st.editAddr = mk(L"EDIT", L"", WS_BORDER | ES_AUTOHSCROLL,
+                      ix, clientTop + 44, iw - 110, 26, kIdEditAddr);
+    mk(L"BUTTON", L"Connect", BS_DEFPUSHBUTTON,
+       ix + iw - 100, clientTop + 44, 100, 26, kIdConnect);
+    st.chkViewOnly = mk(L"BUTTON", L"View only, don't send mouse/keyboard input",
+                         BS_AUTOCHECKBOX, ix, clientTop + 80, iw, 20, kIdChkViewOnly);
 
-    // Áp cho CẢ HAI vai: tick rồi bấm Share ra diag-agent-*.log, bấm Connect ra
-    // diag-client-*.log. Một checkbox chung vì người dùng chỉ cần nhớ một thao tác
-    // ("bật cái này rồi tái hiện lỗi"), còn tên file thì chương trình tự phân biệt.
+    // --- Chung cho cả hai vai + Exit ---
+    // Tick rồi bấm Share ra diag-agent-*.log, bấm Connect ra diag-client-*.log. Một
+    // checkbox chung vì người dùng chỉ cần nhớ một thao tác ("bật cái này rồi tái
+    // hiện lỗi"), còn tên file thì chương trình tự phân biệt.
     st.chkSaveLog = mk(L"BUTTON", L"Save diagnostic log to a file next to this program",
-                        BS_AUTOCHECKBOX, 16, 286, kW - 32, 20, kIdChkSaveLog);
+                        BS_AUTOCHECKBOX, gx, saveLogY, gw, 20, kIdChkSaveLog);
 
-    mk(L"BUTTON", L"Exit", BS_PUSHBUTTON, 16, kH - 60, 100, 28, kIdExit);
+    mk(L"BUTTON", L"Exit", BS_PUSHBUTTON, gx, exitY, 100, 28, kIdExit);
 
     ShowWindow(hwnd, SW_SHOW);
 

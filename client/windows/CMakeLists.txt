@@ -54,5 +54,8 @@ target_include_directories(client PRIVATE
 target_link_libraries(client PRIVATE core platform)
 
 if(MSVC)
-    target_compile_options(client PRIVATE /W3 /permissive- /sdl)
+    # /utf-8: file nguồn là UTF-8 (comment tiếng Việt + chuỗi L"..." có ký tự ngoài
+    # ASCII). Thiếu cờ này MSVC đọc theo codepage hệ thống nên byte UTF-8 trong chuỗi
+    # rộng bị giải mã sai -> nhãn nút hiện ra ký tự rác.
+    target_compile_options(client PRIVATE /W3 /permissive- /sdl /utf-8)
 endif()

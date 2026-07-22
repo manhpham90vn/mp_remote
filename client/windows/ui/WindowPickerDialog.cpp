@@ -116,7 +116,8 @@ void Repopulate(PickerState& st) {
     }
     for (const auto& e : st.entries)
         SendMessageW(st.list, LB_ADDSTRING, 0, (LPARAM)e.label.c_str());
-    SendMessageW(st.list, LB_SETSEL, TRUE, 0); // chọn sẵn dòng đầu
+    // Không chọn sẵn gì: buộc người dùng tự tick đúng thứ muốn chia sẻ thay vì vô ý
+    // chia sẻ nhầm màn hình primary khi bấm Share ngay.
     EnableWindow(GetDlgItem(st.hwnd, kIdOk), TRUE);
 }
 
