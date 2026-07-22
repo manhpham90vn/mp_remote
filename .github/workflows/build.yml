@@ -1,0 +1,113 @@
+name: build
+
+# Dựng exe Windows + apk Android, đẩy lên artifact. Khi push tag v* thì gom cả hai
+# vào một GitHub Release. Không cần secret nào: apk là bản debug (ký bằng khoá debug
+# nên cài được ngay); muốn bản release đã ký thì thêm keystore + signingConfig sau.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Windows: một exe duy nhất (host + client). Build preset Release bằng Ninja +
+  # MSVC, chạy luôn core_tests trước khi xuất artifact.
+  # ---------------------------------------------------------------------------
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # third_party/nvenc-13.0 (nvEncodeAPI.h) là submodule
+
+      - name: Setup MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install Ninja
+        run: choco install ninja -y
+
+      - name: Configure
+        run: cmake --preset x64-release
+
+      - name: Build
+        run: cmake --build --preset x64-release
+
+      - name: Run core tests
+        run: out/build/x64-release/core/core_tests.exe
+
+      - name: Upload exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: deskhub-windows
+          path: out/build/x64-release/client/windows/client.exe
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Android: apk debug (UI Kotlin + libdeskhub.so). NDK/CMake pin đúng phiên bản
+  # build.gradle.kts đang khoá để khớp cách căn trang nhớ 16 KB.
+  # ---------------------------------------------------------------------------
+  android:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client/android
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
+
+      - name: Build debug APK
+        run: |
+          chmod +x ./gradlew
+          ./gradlew assembleDebug --stacktrace
+
+      - name: Upload apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: deskhub-android
+          path: client/android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Release: chỉ chạy khi push tag v*. Gom artifact của hai job trên rồi đính vào
+  # một GitHub Release. Tên file mang tag để tải về khỏi nhầm phiên bản.
+  # ---------------------------------------------------------------------------
+  release:
+    needs: [windows, android]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Rename with tag
+        run: |
+          mkdir -p out
+          cp dist/deskhub-windows/client.exe   "out/deskhub-${GITHUB_REF_NAME}.exe"
+          cp dist/deskhub-android/app-debug.apk "out/deskhub-${GITHUB_REF_NAME}.apk"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            out/deskhub-${{ github.ref_name }}.exe
+            out/deskhub-${{ github.ref_name }}.apk
