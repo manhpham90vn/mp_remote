@@ -58,6 +58,7 @@
 #include "ElevatedShare.h" // IsProcessElevated — chẩn đoán UIPI khi bật điều khiển
 #include "net/Firewall.h"  // tự mở firewall để client không bị timeout
 #include "input/InputInjector.h"
+#include "input/LocalInputMonitor.h" // "host thắng" khi hai bên cùng điều khiển
 #include "encode/IVideoEncoder.h"
 #include "net/NetInfo.h"
 #include "deskhubp/Clock.h"
@@ -667,6 +668,14 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         ui.SetRows(std::move(rows));
     };
     publishRows();
+
+    // "Host thắng" khi hai bên cùng điều khiển: theo dõi chuột/phím VẬT LÝ của
+    // người ngồi máy (hook LL trên thread riêng, lọc cờ injected để không tự tính
+    // input mình bơm); InputInjector::Apply thấy mốc còn mới là bỏ qua input từ
+    // xa ~1s. Chỉ cần khi cho phép điều khiển; sống theo scope RunAgent (dtor tự
+    // Stop trên mọi đường ra).
+    LocalInputMonitor localInputMon;
+    if (opt.allowInput) localInputMon.Start();
 
     if (opt.allowInput) {
         // UIPI nuốt SendInput IM LẶNG khi đích chạy ở mức toàn vẹn cao hơn (game có

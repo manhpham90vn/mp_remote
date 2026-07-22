@@ -39,9 +39,18 @@
 
 #include <cstdio>
 
+#include "input/LocalInputMonitor.h"
+#include "deskhubp/Clock.h"
+
 #pragma comment(lib, "user32.lib")
 
 namespace {
+
+// "Host thắng": sau lần chuột/phím VẬT LÝ gần nhất của người ngồi máy, input từ
+// xa bị bỏ qua thêm quãng này nữa. Đủ dài để host thao tác liền mạch không bị
+// remote chen vào, đủ ngắn để remote lấy lại quyền gần như ngay khi host buông
+// tay (các tool VNC/AnyDesk dùng cùng cỡ ~1s cho heuristic này).
+constexpr uint64_t kHostWinsGraceUs = 1'000'000;
 
 // Đổi pixel màn hình -> tọa độ chuẩn hóa 0..65535 trên MÀN HÌNH ẢO (toàn bộ
 // các màn hình ghép lại). MOUSEEVENTF_VIRTUALDESK bắt buộc khi máy nhiều màn
@@ -71,9 +80,17 @@ bool ForceForeground(HWND w) {
 
     bool ok = false;
     if (AttachThreadInput(myThread, fgThread, TRUE)) {
-        // Cửa sổ bị thu nhỏ/ẩn thì SetForegroundWindow không ăn thua.
-        ShowWindow(w, IsIconic(w) ? SW_RESTORE : SW_SHOW);
-        BringWindowToTop(w);
+        // ⚠ CHỈ DÙNG BIẾN THỂ BẤT ĐỒNG BỘ ở đây. ShowWindow/BringWindowToTop
+        // thường SendMessage ĐỒNG BỘ sang thread của cửa sổ đích — đích đang kẹt
+        // trong vòng lặp modal (người ngồi máy host đang kéo cửa sổ / giữ menu,
+        // chuyện chắc chắn xảy ra khi HAI BÊN cùng điều khiển) là thread Recv
+        // đứng theo → video khựng cả phiên. Tệ hơn: vòng modal đó chỉ thoát khi
+        // có mouse-up, mà mouse-up của client lại do chính thread Recv bơm →
+        // hai bên đợi nhau VĨNH VIỄN (đơ toàn phiên, gặp thật 22/07/2026).
+        // ShowWindowAsync + SWP_ASYNCWINDOWPOS chỉ POST yêu cầu rồi về ngay.
+        ShowWindowAsync(w, IsIconic(w) ? SW_RESTORE : SW_SHOW);
+        SetWindowPos(w, HWND_TOP, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
         ok = SetForegroundWindow(w) != FALSE;
         AttachThreadInput(myThread, fgThread, FALSE);
     }
@@ -99,7 +116,9 @@ bool InputInjector::Init(HWND target) {
     // Đưa cửa sổ đích lên trước để input tới đúng nó. Windows hạn chế
     // SetForegroundWindow từ process không có focus -> best-effort, nếu thất bại
     // thì người dùng ở máy host tự bấm vào cửa sổ một lần là xong.
-    if (IsIconic(target_)) ShowWindow(target_, SW_RESTORE);
+    // ShowWindowAsync, không ShowWindow: hàm này chạy trên thread Recv, mà bản
+    // đồng bộ chặn đợi thread của cửa sổ đích — xem cảnh báo ở ForceForeground.
+    if (IsIconic(target_)) ShowWindowAsync(target_, SW_RESTORE);
     if (!ForceForeground(target_))
         std::printf(
             "[Inject] Could not bring the target window to the foreground - please click "
@@ -234,6 +253,29 @@ void InputInjector::Apply(const deskhub::InputEvent& e) {
     if (!TargetHasFocus()) {
         ++skipped_;
         return;
+    }
+
+    // Chốt "HOST THẮNG" (chốt an toàn thứ ba, xem InputInjector.h): người ngồi
+    // tại máy vừa động chuột/phím THẬT thì input từ xa nhường trong ~1s — hai
+    // bên cùng thao tác thì người tại máy được ưu tiên, hết cảnh giằng con trỏ
+    // và lây phím bổ trợ chéo. LocalInputMonitor đã lọc input tự bơm (cờ
+    // injected) nên không có vòng tự-khoá; monitor không chạy thì mốc = 0 và
+    // chốt này tự tắt. Vào trạng thái nhường là ReleaseAll ngay — remote đang
+    // giữ phím mà bị nhường thì phím phải được nhả, không để kẹt.
+    const uint64_t lastLocal = LocalInputMonitor::LastPhysicalUs();
+    if (lastLocal && NowUs() - lastLocal < kHostWinsGraceUs) {
+        if (!localSuppressed_) {
+            localSuppressed_ = true;
+            std::printf(
+                "[Inject] Local user is active - pausing remote input (host wins).\n");
+            ReleaseAll();
+        }
+        ++skipped_;
+        return;
+    }
+    if (localSuppressed_) {
+        localSuppressed_ = false;
+        std::printf("[Inject] Local user idle - remote input resumed.\n");
     }
     ++applied_;
 

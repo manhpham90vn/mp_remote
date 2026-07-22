@@ -21,7 +21,7 @@
 //   không thôi thì game không thấy gì. Đây là lý do phần lớn công cụ điều khiển từ
 //   xa không chơi được game — và là điểm đối xứng với InputCapture ở đầu kia.
 //
-// ⚠ HAI CƠ CHẾ AN TOÀN, cả hai đều bắt buộc
+// ⚠ BA CƠ CHẾ AN TOÀN / ƯU TIÊN
 //   1. CHỐT FOREGROUND (TargetHasFocus). SendInput bơm vào cửa sổ ĐANG FOREGROUND
 //      chứ không vào một HWND cụ thể. Nếu người ngồi ở máy host bấm sang ứng dụng
 //      khác, mọi phím/chuột từ xa sẽ rơi vào ứng dụng đó — vừa sai vừa NGUY HIỂM
@@ -30,6 +30,10 @@
 //   2. CHỐNG KẸT PHÍM (ReleaseAll). Injector nhớ mọi phím/nút đang giữ. Client mất
 //      kết nối giữa lúc đang giữ W thì sự kiện nhả không bao giờ tới, và nhân vật
 //      chạy mãi. HostSession gọi ReleaseAll khi BYE/timeout.
+//   3. HOST THẮNG (LocalInputMonitor). Hai bên cùng thao tác thì input trộn thẳng
+//      vào nhau: giằng con trỏ, phím bổ trợ lây chéo (host giữ Ctrl thật + remote
+//      gõ S = Ctrl+S). Người ngồi tại máy vừa động chuột/phím THẬT là input từ xa
+//      nhường trong ~1s — xem input/LocalInputMonitor.h và Apply().
 //
 // MÔ HÌNH LUỒNG
 //   Apply() được gọi từ luồng Recv của AgentLoop.
@@ -101,7 +105,8 @@ private:
     HWND target_ = nullptr; // đúng một trong hai khác nullptr
     HMONITOR monitor_ = nullptr;
     bool enabled_ = true;
-    bool hadFocus_ = true; // để chỉ log một lần mỗi khi đổi trạng thái focus
+    bool hadFocus_ = true;         // để chỉ log một lần mỗi khi đổi trạng thái focus
+    bool localSuppressed_ = false; // đang nhường "host thắng" — log một lần mỗi lượt
     uint64_t applied_ = 0;
     uint64_t skipped_ = 0;                // event bị bỏ vì cửa sổ đích không còn foreground
     std::map<int32_t, int32_t> keysDown_; // scancode (kèm bit E0) -> mã phím ảo

@@ -50,6 +50,7 @@ add_executable(client WIN32
 
     input/InputCapture.cpp
     input/InputInjector.cpp
+    input/LocalInputMonitor.cpp
 
     ui/MainMenuWindow.cpp
     ui/WindowPickerDialog.cpp
