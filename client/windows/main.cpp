@@ -21,11 +21,17 @@
 //   Vừa được UAC nâng quyền → nhận lại nguồn qua dòng lệnh, vào thẳng RunAgent()
 //                             rồi mới về màn hình chính. Xem ElevatedShare.h.
 //
+// APP GUI THUẦN, KHÔNG CONSOLE
+//   Điểm vào là wWinMain (subsystem WINDOWS) — chạy exe không bung cửa sổ console.
+//   Mọi log của chương trình đổ vào một file cạnh exe qua StartProcessLog(), mở
+//   một lần ở đây và sống trọn đời tiến trình. Không còn stdout ra màn hình, không
+//   còn checkbox bật/tắt log — xem DiagLog.h.
+//
 // GHI CHÚ LỊCH SỬ
 //   Test offline của core từng nằm ở đây (`client.exe --nettest`). Nay là target
 //   riêng — xem core/tests/CoreTests.cpp.
 //
-// LIÊN QUAN: ui/MainMenuWindow.h, ElevatedShare.h, AgentLoop.h,
+// LIÊN QUAN: ui/MainMenuWindow.h, ElevatedShare.h, AgentLoop.h, DiagLog.h,
 //            capture/WindowCapture.h (InitRuntime)
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
@@ -34,7 +40,6 @@
 
 #include <windows.h>
 #include <clocale>
-#include <cstdio>
 
 #include "AgentLoop.h"
 #include "DiagLog.h"
@@ -45,16 +50,19 @@
 #include <shellapi.h>
 #include <vector>
 
-int main() {
+int APIENTRY wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
+    // Redirect toàn bộ log ra file NGAY từ đầu — trước mọi khởi tạo khác — để không
+    // sót đoạn đầu nếu có sự cố sớm. App không có console nên đây là nơi log duy
+    // nhất đi tới (xem DiagLog.h). Không tạo được file thì vẫn chạy tiếp, chỉ là
+    // các printf rơi vào stdout không gắn đâu.
+    StartProcessLog();
+
     // PER_MONITOR_AWARE_V2: nói với Windows rằng ta tự xử lý tỉ lệ DPI. Không khai
     // thì Windows co giãn giả cửa sổ, và GetClientRect trả kích thước ĐÃ co giãn —
     // toạ độ chuột quy đổi ra sẽ lệch trên mọi máy đặt tỉ lệ khác 100%.
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
-    // UTF-8 cho console để wprintf in đúng tiêu đề cửa sổ có dấu (tiếng Việt...).
+    // UTF-8 cho stream log để wprintf ghi đúng tiêu đề cửa sổ có dấu (tiếng Việt...).
     std::setlocale(LC_ALL, ".UTF8");
-    SetConsoleOutputCP(CP_UTF8);
-    // Log ra ngay cả khi stdout bị redirect (CRT full-buffer khi không phải console).
-    setvbuf(stdout, nullptr, _IONBF, 0);
     capture::InitRuntime();
 
     // Instance này có thể là bản vừa được UAC nâng quyền từ nút Share (xem
@@ -68,14 +76,9 @@ int main() {
         const bool elevatedShare = ParseElevatedShareArgs(wadeskhub, wargv, sources, opt);
         LocalFree(wargv);
         if (elevatedShare) {
-            // Instance này LÀ phiên host thật. Redirect của shell gốc không với tới
-            // đây (UAC dựng tiến trình mới), nên tự mở file log lấy — xem DiagLog.h.
-            // Scope riêng: stdout phải về lại console trước khi mở menu.
-            {
-                DiagLogRedirect diagLog;
-                if (opt.diagLog) diagLog.Start(DiagRole::Agent);
-                RunAgent(sources, opt);
-            }
+            // Instance này LÀ phiên host thật (đã tự mở file log riêng ở trên nhờ
+            // pid trong tên file, không đè log của instance gốc).
+            RunAgent(sources, opt);
             return RunMainMenuWindow();
         }
     }

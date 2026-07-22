@@ -134,9 +134,7 @@ bool RelaunchElevatedShare(std::span<const AgentSource> sources,
     std::wstring args = kFlagShare;
     args += nums;
     if (opt.allowInput) args += L" --allow-input";
-    // Không truyền cờ này thì phiên host thật (chạy trong instance admin) không ghi
-    // log — đúng cái bẫy đã làm diag-host.log ra 0 byte. Xem DiagLog.h.
-    if (opt.diagLog) args += L" --diag-log";
+    // Instance admin tự mở file log riêng (pid trong tên file), không cần truyền cờ.
     for (const auto& s : sources) args += L" --src " + EncodeSource(s);
 
     SHELLEXECUTEINFOW sei{};
@@ -171,8 +169,6 @@ bool ParseElevatedShareArgs(int adeskhub, wchar_t** argv,
         const bool hasNext = (i + 1) < adeskhub;
         if (a == L"--allow-input") {
             opt.allowInput = true;
-        } else if (a == L"--diag-log") {
-            opt.diagLog = true;
         } else if (a == L"--port" && hasNext) {
             opt.port = uint16_t(wcstoul(argv[++i], nullptr, 10));
         } else if (a == L"--fps" && hasNext) {

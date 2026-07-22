@@ -1,19 +1,24 @@
 // =============================================================================
-// DiagLog.cpp — cài đặt việc đổi hướng log sang file.
+// DiagLog.cpp — cài đặt việc đổi hướng toàn bộ log của tiến trình sang file.
 //
-// VÌ SAO FREOPEN CHỨ KHÔNG TỰ MỞ MỘT FILE RIÊNG ĐỂ GHI
-//   Log rải khắp chương trình bằng std::printf/std::wprintf trên stdout (AgentLoop,
-//   ClientLoop, MfEncoder, ...). Thay hết bằng một hàm log riêng là sửa hàng trăm
-//   chỗ và dễ sót. freopen tóm đúng cái stdout ấy — cùng một đường mà `> file` của
-//   cmd đi, tức là con đường đã biết chắc cho ra UTF-8 đọc được.
+// VÌ SAO FREOPEN, VÌ SAO MỘT FILE MỖI TIẾN TRÌNH: xem DiagLog.h.
 //
-// HAI CHI TIẾT DỄ SAI
-//   1. freopen ĐẶT LẠI chế độ buffer. main.cpp đã setvbuf(_IONBF) để log ra ngay
-//      cả khi bị redirect, nhưng thiết lập đó áp lên stream CŨ; không gọi lại thì
-//      stream mới quay về full-buffer 4KB và một cú crash sẽ nuốt mất đoạn đuôi —
-//      đúng đoạn cần đọc nhất.
-//   2. Trả lại stdout phải qua _dup/_dup2 ở tầng FD, không phải freopen("CON").
-//      Instance admin không chắc có console để mở lại, còn fd gốc thì luôn còn.
+// ⚠ KHÔNG ĐỂ GHI LOG CHẶN LUỒNG NÓNG
+//   Log LUÔN bật và [DIAG] in dày trên vòng recv/encode. Nếu để stdout unbuffered
+//   thì mỗi printf là một lời gọi ghi đĩa NGAY trên luồng đó — gặp đĩa chậm hay AV
+//   quét file là recv ngừng nghe, buffer UDP tràn, mất gói THẬT (đúng cái recv_stall
+//   mà log định bắt). Nên:
+//     1. stdout dùng BUFFER LỚN (_IOFBF): printf trên luồng nóng chỉ là memcpy vào
+//        RAM, không đụng đĩa.
+//     2. Một THREAD FLUSH NỀN xả buffer ra đĩa mỗi ~500 ms. Việc ghi đĩa (syscall)
+//        nằm trên thread phụ này, không trên luồng chính; và nhờ xả đều nên buffer
+//        gần như không bao giờ tự đầy giữa hai lần xả (tránh nốt lần flush hiếm hoi
+//        rơi vào luồng nóng). Mất mát tối đa khi crash ~ một chu kỳ xả.
+//     3. stderr để unbuffered: lỗi hiếm và cần chạm đĩa ngay, không lo chặn.
+//
+// KHÔNG CÓ ĐƯỜNG TRẢ LẠI (không Stop/restore): app không còn console để trả stdout
+// về, file log sống trọn đời tiến trình — thoát bình thường thì CRT tự flush stdio,
+// hệ điều hành đóng file. Thread flush là daemon detached, chết theo tiến trình.
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -22,10 +27,16 @@
 
 #include <windows.h>
 
+#include <chrono>
 #include <cstdio>
 #include <io.h>
+#include <thread>
 
 namespace {
+
+// Buffer của stdout: đủ lớn để vài giây log dồn dập không làm nó tự đầy giữa hai
+// lần flush nền. Sống trọn đời tiến trình (BSS) vì stdout tham chiếu tới nó.
+char g_logBuf[256 * 1024];
 
 // Thư mục chứa exe. Log nằm cạnh exe để người dùng gửi kèm khỏi phải đi tìm.
 std::wstring ExeDir() {
@@ -39,66 +50,42 @@ std::wstring ExeDir() {
 
 } // namespace
 
-bool DiagLogRedirect::Start(DiagRole role) {
-    if (active_) return true;
-
+bool StartProcessLog(std::wstring* outPath) {
     SYSTEMTIME t{};
     GetLocalTime(&t);
 
     // Giờ ĐỊA PHƯƠNG chứ không phải UTC: người dùng đối chiếu log với "lúc nãy nó
-    // giật khoảng 8 rưỡi", và họ đọc giờ trên đồng hồ máy mình.
-    wchar_t name[64];
-    swprintf(name, 64, L"diag-%ls-%04u%02u%02u-%02u%02u%02u.log",
-        role == DiagRole::Agent ? L"agent" : L"client",
-        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    // giật khoảng 8 rưỡi", và họ đọc giờ trên đồng hồ máy mình. pid tách file của
+    // instance thường khỏi instance admin khi cùng khởi động trong một giây.
+    wchar_t name[80];
+    swprintf(name, 80, L"deskhub-%04u%02u%02u-%02u%02u%02u-%lu.log",
+        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond,
+        (unsigned long)GetCurrentProcessId());
 
     const std::wstring full = ExeDir() + name;
 
-    // Giữ fd gốc TRƯỚC khi freopen — sau freopen thì stdout cũ không còn đường về.
-    savedOut_ = _dup(_fileno(stdout));
+    if (!_wfreopen(full.c_str(), L"w", stdout)) return false;
+    // Buffer lớn: hot path chỉ memcpy, không ghi đĩa từng dòng (xem đầu file).
+    setvbuf(stdout, g_logBuf, _IOFBF, sizeof(g_logBuf));
 
-    if (!_wfreopen(full.c_str(), L"w", stdout)) {
-        if (savedOut_ >= 0) {
-            _close(savedOut_);
-            savedOut_ = -1;
-        }
-        return false;
-    }
-    setvbuf(stdout, nullptr, _IONBF, 0); // freopen vừa xoá mất thiết lập của main()
-
-    // stderr gộp chung một file: thứ tự các dòng giữa hai luồng mới đọc được, và
-    // người dùng chỉ phải gửi một file.
-    savedErr_ = _dup(_fileno(stderr));
+    // stderr gộp chung file với stdout (một file để gửi), nhưng để unbuffered để
+    // lỗi chạm đĩa ngay.
     _dup2(_fileno(stdout), _fileno(stderr));
     setvbuf(stderr, nullptr, _IONBF, 0);
 
-    path_ = full;
-    active_ = true;
+    if (outPath) *outPath = full;
 
-    std::printf("[DiagLog] %ls role=%ls started %04u-%02u-%02u %02u:%02u:%02u\n",
-        name, role == DiagRole::Agent ? L"agent" : L"client",
-        t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+    std::printf("[DiagLog] %ls started %04u-%02u-%02u %02u:%02u:%02u\n",
+        name, t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute, t.wSecond);
+
+    // Thread xả buffer ra đĩa định kỳ, KHÔNG trên luồng nóng. Detached: chạy tới khi
+    // tiến trình thoát.
+    std::thread([] {
+        for (;;) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            std::fflush(stdout);
+        }
+    }).detach();
+
     return true;
-}
-
-void DiagLogRedirect::Stop() {
-    if (!active_) return;
-    std::fflush(stdout);
-    std::fflush(stderr);
-
-    if (savedErr_ >= 0) {
-        _dup2(savedErr_, _fileno(stderr));
-        _close(savedErr_);
-        savedErr_ = -1;
-    }
-    if (savedOut_ >= 0) {
-        _dup2(savedOut_, _fileno(stdout));
-        _close(savedOut_);
-        savedOut_ = -1;
-    }
-    active_ = false;
-}
-
-DiagLogRedirect::~DiagLogRedirect() {
-    Stop();
 }

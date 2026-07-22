@@ -17,7 +17,10 @@ enable_language(RC)
 # encode/ + decode/ (codec), input/, ui/ (dialog Win32). Ở gốc chỉ còn main + hai
 # vai trò (AgentLoop = host, ClientLoop = client) + ElevatedShare (vòng đời UAC).
 # client.rc nhúng manifest + version info (giảm báo nhầm virus — xem client.rc).
-add_executable(client
+#
+# WIN32: app GUI thuần, điểm vào wWinMain, KHÔNG bung cửa sổ console. Log của
+# chương trình đổ vào file cạnh exe (DiagLog.h), không ra màn hình.
+add_executable(client WIN32
     main.cpp
     AgentLoop.cpp
     ClientLoop.cpp
@@ -53,7 +56,7 @@ add_executable(client
     ui/SourcePickerDialog.cpp
 )
 
-target_compile_definitions(client PRIVATE UNICODE _UNICODE _CONSOLE)
+target_compile_definitions(client PRIVATE UNICODE _UNICODE)
 # Include gốc client/windows để mọi #include ghi đủ đường dẫn nhóm ("net/UdpSocket.h").
 target_include_directories(client PRIVATE
     "${CMAKE_CURRENT_SOURCE_DIR}"

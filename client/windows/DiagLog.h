@@ -1,67 +1,35 @@
 #pragma once
 // =============================================================================
-// DiagLog.h — chuyển toàn bộ log ra file, bật bằng checkbox ở màn hình chính.
+// DiagLog.h — luôn chuyển toàn bộ log của tiến trình ra một file cạnh exe.
 //
 // NHIỆM VỤ
-//   Người dùng tick "Save diagnostic log to a file" rồi bấm Share/Connect; mọi thứ
-//   chương trình in ra (kể cả dòng [DIAG] của docs/09-diagnostics.md) chảy vào một
-//   file cạnh exe, tên theo VAI TRÒ và thời điểm chạy.
+//   client.exe là app GUI thuần (không console). Mọi thứ chương trình in ra bằng
+//   printf/wprintf trên stdout/stderr — kể cả dòng [DIAG] của docs/09 — được đổi
+//   hướng vào một file ngay khi tiến trình khởi động và ở đó tới lúc thoát. Không
+//   còn checkbox, không còn console: log LUÔN có sẵn khi cần gửi đi chẩn đoán.
 //
-// VÌ SAO KHÔNG BẢO NGƯỜI DÙNG TỰ REDIRECT
-//   docs/09-diagnostics.md từng hướng dẫn `client.exe > diag-host.log 2>&1`. Cách
-//   đó hỏng ở đúng ca cần log nhất — vai HOST có bật điều khiển:
-//     1. UAC. Bấm Share có "allow control" thì RelaunchElevatedShare() dựng một
-//        TIẾN TRÌNH MỚI qua ShellExecuteExW/runas. Tiến trình đó KHÔNG kế thừa
-//        redirect của shell gốc, nên phiên host thật không ghi được chữ nào —
-//        file redirect nằm lại 0 byte (đã gặp: diag-host.log 21/07/2026).
-//     2. PowerShell. Toán tử `>` của PS 5.1 ghi ra UTF-16LE, làm grep/ripgrep coi
-//        file như nhị phân. Tự mở file bằng freopen thì ra UTF-8 như cmd.
-//   Cả hai lỗi đều thuộc loại người dùng không tự đoán ra được, nên đưa hẳn vào
-//   chương trình thay vì viết thêm chú ý trong tài liệu.
+// VÌ SAO REDIRECT NGAY LÚC KHỞI ĐỘNG, KHÔNG PHẢI KHI BẮT ĐẦU PHIÊN
+//   Sự cố hay xảy ra ở khâu đàm phán/đầu phiên. Bật log muộn (khi người dùng ra
+//   lệnh) thì đúng đoạn cần nhất lại chưa được ghi. Mở file một lần ở đầu wWinMain
+//   phủ trọn mọi phiên Share/Connect của lần chạy này.
 //
-// TÊN FILE TÁCH THEO VAI TRÒ
-//   diag-agent-<ngày>-<giờ>.log   — vai host (chia sẻ)
-//   diag-client-<ngày>-<giờ>.log  — vai client (xem)
-//   Một phiên chẩn đoán cần CẢ HAI file (xem docs/09-diagnostics.md §1), mà hai vai
-//   thường chạy trên hai máy rồi gộp lại một thư mục — trùng tên là mất bằng chứng.
-//   Dấu thời gian giữ lại lần chạy trước, vì lỗi giật hay phải thử vài lần mới dính.
+// VÌ SAO FREOPEN CHỨ KHÔNG TỰ MỞ MỘT FILE RIÊNG ĐỂ GHI
+//   Log rải khắp chương trình bằng printf/wprintf trên stdout. freopen tóm đúng
+//   cái stdout ấy — cùng một đường mà `> file` của cmd đi, tức con đường đã biết
+//   chắc cho ra UTF-8 đọc được — nên không phải sửa hàng trăm chỗ gọi.
 //
-// LIÊN QUAN: ui/MainMenuWindow.cpp (checkbox + gọi Start), main.cpp (đường instance
-//            admin), ElevatedShare.h (cờ --diag-log), docs/09-diagnostics.md
+// MỖI TIẾN TRÌNH MỘT FILE
+//   Tên: deskhub-<ngày>-<giờ>-<pid>.log. Có pid để instance thường và instance
+//   admin (Share có điều khiển bung UAC — xem ElevatedShare.h) không ghi đè nhau
+//   khi cùng khởi động trong một giây. Vai (agent/client) đã nằm trong từng dòng
+//   log nên không cần đưa vào tên file.
+//
+// LIÊN QUAN: main.cpp (nơi gọi StartProcessLog), docs/09-diagnostics.md
 // =============================================================================
 #include <string>
 
-enum class DiagRole { Agent,
-    Client };
-
-// Đổi hướng stdout+stderr sang file trong suốt một phiên, trả lại như cũ khi hết
-// phạm vi. RAII vì màn hình chính chạy nhiều phiên liên tiếp: mỗi phiên một file,
-// và console phải sống lại giữa hai phiên để menu còn in được.
-class DiagLogRedirect {
-public:
-    DiagLogRedirect() = default;
-    ~DiagLogRedirect();
-
-    DiagLogRedirect(const DiagLogRedirect&) = delete;
-    DiagLogRedirect& operator=(const DiagLogRedirect&) = delete;
-
-    // Mở file cạnh exe và bắt đầu hứng log. False = không tạo được file (thư mục
-    // chỉ-đọc, ví dụ exe nằm trong Program Files) — phiên vẫn phải chạy tiếp, chỉ
-    // là không có log.
-    bool Start(DiagRole role);
-
-    bool active() const {
-        return active_;
-    }
-    const std::wstring& path() const {
-        return path_;
-    }
-
-private:
-    void Stop();
-
-    std::wstring path_;
-    int savedOut_ = -1; // fd gốc của stdout/stderr, giữ để trả lại
-    int savedErr_ = -1;
-    bool active_ = false;
-};
+// Mở file log cạnh exe và đổi hướng stdout+stderr vào đó cho tới hết tiến trình.
+// Gọi MỘT LẦN ở đầu wWinMain. Trả false nếu không tạo được file (thư mục chỉ-đọc,
+// ví dụ exe nằm trong Program Files) — chương trình vẫn chạy tiếp, chỉ là không có
+// log. Khi `outPath` khác null, ghi đường dẫn file đã mở vào đó.
+bool StartProcessLog(std::wstring* outPath = nullptr);

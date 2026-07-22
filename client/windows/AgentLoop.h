@@ -36,10 +36,6 @@ struct AgentOptions {
     uint32_t fps = 60;
     uint32_t bitrateMbps = 20;
     bool allowInput = true; // GD4: cho client điều khiển
-    // Ghi log ra file thay vì console (checkbox ở màn hình chính). Phải nằm trong
-    // struct này vì nút Share có thể nhảy sang instance admin, và cờ đi cùng phiên
-    // qua dòng lệnh — xem DiagLog.h.
-    bool diagLog = false;
 };
 
 // Một nguồn được chia sẻ. `name` là tên hiện ở danh sách phía client (UTF-8).
