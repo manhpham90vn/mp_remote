@@ -46,6 +46,7 @@
 #include "ClientLoop.h"
 #include "DiagLog.h"
 #include "ElevatedShare.h"
+#include "net/Firewall.h"
 #include "net/NetInfo.h"
 #include "ui/SourcePickerDialog.h"
 #include "net/UdpSocket.h"
@@ -150,26 +151,36 @@ void DoShare(MenuState& st) {
     // duy nhất mang yêu cầu ghi log đi cùng (ElevatedShare.cpp thêm --diag-log).
     ao.diagLog = WantDiagLog(st);
 
-    // UIPI: input chỉ đi tới được cửa sổ của tiến trình có integrity level không
-    // cao hơn mình. Host quyền thường vẫn capture được game/app chạy admin nhưng
-    // SendInput bị nuốt im lặng - nên xin elevate ngay lúc bấm Share thay vì để
-    // người kia phát hiện chuột/phím chết giữa phiên.
-    if (ao.allowInput && !IsProcessElevated()) {
+    // HAI lý do cần quyền admin, gộp vào MỘT lần bung UAC lúc bấm Share:
+    //   • allowInput  — UIPI: input chỉ đi tới được cửa sổ của tiến trình có integrity
+    //                   level không cao hơn mình. Host quyền thường vẫn capture được
+    //                   game/app chạy admin nhưng SendInput bị nuốt IM LẶNG.
+    //   • firewall    — thêm rule inbound để client không bị timeout; thêm rule đòi
+    //                   admin, và chỉ cần khi rule chưa có sẵn (những lần sau bỏ qua).
+    // Instance admin tiếp quản sẽ vừa gửi được input vừa thêm rule (AgentLoop gọi
+    // EnsureHostFirewallRule khi mở socket).
+    const bool needFirewall = !HostFirewallRulePresent();
+    if ((ao.allowInput || needFirewall) && !IsProcessElevated()) {
         bool cancelled = false;
         if (RelaunchElevatedShare(sources, ao, cancelled)) {
             st.quit = true; // instance admin tiếp quản đúng phiên này
             return;
         }
-        MessageBoxW(st.hwnd,
-                    cancelled
-                        ? L"Continuing without administrator rights.\n\n"
-                          L"Mouse/keyboard control will not reach apps that run as "
-                          L"administrator (games with anti-cheat, elevated tools). "
-                          L"Everything else still works."
-                        : L"Could not restart as administrator.\n\n"
-                          L"Sharing continues without it: mouse/keyboard control will "
-                          L"not reach apps that run as administrator.",
-                    L"RemoteGame", MB_OK | MB_ICONWARNING);
+        // Không nâng được quyền: nêu đúng hệ quả của TỪNG lý do đang áp dụng, để người
+        // dùng biết chính xác cái gì sẽ không chạy.
+        std::wstring msg = cancelled
+            ? std::wstring(L"Continuing without administrator rights.\n\n")
+            : std::wstring(L"Could not restart as administrator. Sharing continues "
+                           L"without it.\n\n");
+        if (needFirewall)
+            msg += L"- Windows Firewall may block the other machine from connecting. "
+                   L"If it cannot connect, allow client.exe through Windows Firewall for "
+                   L"the network you are on, or run this program as administrator once.\n\n";
+        if (ao.allowInput)
+            msg += L"- Mouse/keyboard control will not reach apps that run as "
+                   L"administrator (games with anti-cheat, elevated tools). Everything "
+                   L"else still works.";
+        MessageBoxW(st.hwnd, msg.c_str(), L"RemoteGame", MB_OK | MB_ICONWARNING);
     }
 
     ShowWindow(st.hwnd, SW_HIDE);
@@ -275,6 +286,13 @@ int RunMainMenuWindow() {
     const auto addrs = ListLocalIPv4();
     const int nRows = addrs.empty() ? 1 : (int)addrs.size();
 
+    // Chọn sẵn cổng host: ưu tiên 47777, nếu bận (host cũ còn chạy ngầm) thì +1 dần
+    // tới cổng trống kế tiếp. Dò NGAY LÚC NÀY để cổng hiển thị + copy + điền vào ô
+    // Port khớp đúng cổng mà phiên Share sắp tới sẽ bind (AgentLoop dò lại cùng kiểu).
+    const uint16_t freePort = FindFreeUdpPort(kDefaultPort, 64);
+    const uint16_t sharePort = freePort ? freePort : kDefaultPort;
+    const std::wstring sharePortText = std::to_wstring(sharePort);
+
     // --- Bố cục: hai group box xếp dọc, dưới cùng là tuỳ chọn chung + Exit ---
     constexpr int kW = 496;
     const int gx = 12;             // lề trái của group box
@@ -319,9 +337,9 @@ int RunMainMenuWindow() {
     mk(L"BUTTON", L"Host mode - share an application on THIS machine",
        BS_GROUPBOX, gx, hostTop, gw, hostH, 0);
 
-    // Địa chỉ máy này: đọc/copy cho người bên kia gõ vào ô Connect của họ. Cổng hiển
-    // thị là mặc định; đổi ô Port bên dưới không tự cập nhật dòng này (nút Copy cũng
-    // chỉ copy IP, không kèm cổng).
+    // Địa chỉ máy này: đọc/copy cho người bên kia gõ vào ô Connect của họ. Nút Copy
+    // lấy CẢ ip lẫn cổng (ip:port) để họ dán thẳng, không phải nhớ cổng riêng. Cổng
+    // hiển thị = cổng phiên Share sắp dùng (đã dò ở trên).
     mk(L"STATIC", L"Others connect to you using one of these addresses:",
        SS_LEFT, ix, hostTop + 22, iw, 16, 0);
 
@@ -336,13 +354,14 @@ int RunMainMenuWindow() {
         for (const auto& a : addrs) {
             const int rowY = hostTop + 44 + i * rowH;
             std::wstring wip(a.ip.begin(), a.ip.end());
+            std::wstring addr = wip + L":" + sharePortText; // giá trị Copy = ip:port
             wchar_t line[192];
-            swprintf(line, 192, L"%-20ls %ls:%u", a.name.c_str(), wip.c_str(), kDefaultPort);
+            swprintf(line, 192, L"%-20ls %ls", a.name.c_str(), addr.c_str());
             mk(L"STATIC", line, SS_LEFT | SS_ENDELLIPSIS,
                ix, rowY + 2, copyX - 8 - ix, 18, 0);
             mk(L"BUTTON", L"Copy", BS_PUSHBUTTON,
                copyX, rowY, kCopyW, kCopyH, kIdCopyBase + i);
-            st.copyIps.push_back(std::move(wip)); // Copy chỉ lấy IP, không kèm cổng
+            st.copyIps.push_back(std::move(addr));
             ++i;
         }
     }
@@ -350,7 +369,7 @@ int RunMainMenuWindow() {
     // Thông số phía host: Port máy này lắng nghe + FPS + Bitrate của luồng gửi đi.
     const int sy = hostTop + settingsRel;
     mk(L"STATIC", L"Port", SS_LEFT, ix, sy + 3, 32, 18, 0);
-    st.editPort = mk(L"EDIT", L"47777", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
+    st.editPort = mk(L"EDIT", sharePortText.c_str(), WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
                       ix + 36, sy, 64, 24, kIdEditPort);
     mk(L"STATIC", L"FPS", SS_LEFT, ix + 116, sy + 3, 30, 18, 0);
     st.editFps = mk(L"EDIT", L"60", WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,

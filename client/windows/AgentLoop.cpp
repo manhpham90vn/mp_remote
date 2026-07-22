@@ -55,6 +55,7 @@
 
 #include "capture/GpuSelect.h"
 #include "ElevatedShare.h" // IsProcessElevated — chẩn đoán UIPI khi bật điều khiển
+#include "net/Firewall.h"  // tự mở firewall để client không bị timeout
 #include "input/InputInjector.h"
 #include "encode/IVideoEncoder.h"
 #include "net/NetInfo.h"
@@ -227,13 +228,53 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         if (SUCCEEDED(gpu.device.As(&mt))) mt->SetMultithreadProtected(TRUE);
     }
 
+    // Ưu tiên cổng người dùng chọn, kẹt thì +1 dần tới cổng trống kế tiếp — một host
+    // cũ còn chạy ngầm không còn chặn được phiên mới. Cổng THẬT (boundPort) mới là
+    // cái phải in ra cho máy kia gõ, không phải opt.port ban đầu.
     UdpSocket sock;
-    if (!sock.Open(opt.port)) return 1;
+    uint16_t boundPort = opt.port;
+    {
+        constexpr int kPortTries = 64;
+        bool opened = false;
+        for (int i = 0; i < kPortTries; ++i) {
+            const int p = int(opt.port) + i;
+            if (p <= 0 || p > 65535) break;
+            boundPort = uint16_t(p);
+            if (sock.Open(boundPort)) { opened = true; break; }
+            if (!sock.lastBindAddrInUse()) break; // lỗi khác cổng-bận -> dừng, Open đã in
+        }
+        if (!opened) {
+            wchar_t m[512];
+            swprintf(m, 512,
+                     L"Cannot start sharing: no free UDP port found from %u to %u.\n\n"
+                     L"Several RemoteGame hosts may still be running in the background "
+                     L"(their windows stay hidden while sharing). Close them from Task "
+                     L"Manager (client.exe) and try again.",
+                     unsigned(opt.port), unsigned(opt.port) + kPortTries - 1);
+            MessageBoxW(nullptr, m, L"RemoteGame", MB_OK | MB_ICONWARNING);
+            return 1;
+        }
+    }
+    if (boundPort != opt.port)
+        std::printf("[Agent] Port %u was busy — using %u instead. Tell the other person "
+                    "to use this port.\n", unsigned(opt.port), unsigned(boundPort));
     sock.SetRecvTimeout(100);
+
+    // Mở firewall cho gói inbound tới được đây. Thêm rule cần admin; instance thường
+    // đã bung UAC trước khi vào đây (xem MainMenuWindow::DoShare) nên tới đây thường
+    // là đã elevated. Không thêm được thì chỉ cảnh báo — phiên vẫn chạy, chỉ là
+    // client có thể không kết nối được cho tới khi firewall được mở tay.
+    if (EnsureHostFirewallRule())
+        std::printf("[Agent] Windows Firewall: inbound rule verified (all profiles).\n");
+    else
+        std::printf("[Agent] Could not add/verify a Windows Firewall rule (needs admin). "
+                    "If the other machine cannot connect, allow client.exe through Windows "
+                    "Firewall for the current network.\n");
+
     std::printf("[Agent] Listening on UDP port %u. On the other machine, open client.exe"
-                " and enter one of:\n", opt.port);
+                " and enter one of:\n", boundPort);
     for (const auto& a : ListLocalIPv4())
-        std::wprintf(L"    %hs:%u    (%ls)\n", a.ip.c_str(), opt.port, a.name.c_str());
+        std::wprintf(L"    %hs:%u    (%ls)\n", a.ip.c_str(), boundPort, a.name.c_str());
 
     const uint32_t startBitrate = opt.bitrateMbps * 1'000'000u;
     const uint32_t maxBitrate   = startBitrate;

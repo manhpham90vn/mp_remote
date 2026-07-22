@@ -21,6 +21,7 @@ add_executable(client
 
     net/UdpSocket.cpp
     net/NetInfo.cpp
+    net/Firewall.cpp
     # net/Pacer.cpp — CHƯA nối vào build: không file nào include Pacer.h và nó chưa
     # từng được compile (thêm ở c55a8f9 nhưng thiếu bước wire vào Packetizer).
     # Giữ nguyên trạng thái cũ ở đây; xem ghi chú đầu net/Pacer.h.

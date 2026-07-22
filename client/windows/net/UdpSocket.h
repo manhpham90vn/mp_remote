@@ -52,6 +52,11 @@ struct NetAddr {
 // "ip[:port]" -> NetAddr (port mặc định nếu không ghi). false nếu sai cú pháp.
 bool ParseNetAddr(const std::string& s, uint16_t defaultPort, NetAddr& out);
 
+// Tìm cổng UDP TRỐNG đầu tiên trong [start, start+count) bằng cách thử bind rồi đóng
+// ngay. Trả 0 nếu cả dải đều bận. Dùng để host chọn cổng lúc khởi động (ưu tiên
+// 47777, kẹt thì +1 dần) mà không đụng tới host cũ đang chạy. Im lặng — không in log.
+uint16_t FindFreeUdpPort(uint16_t start, int count);
+
 class UdpSocket {
 public:
     UdpSocket() = default;
@@ -74,7 +79,13 @@ public:
     void Close();
     bool IsOpen() const { return sock_ != ~0ull; }
 
+    // Sau khi Open() trả false: true nếu nguyên nhân là CỔNG ĐÃ BỊ CHIẾM
+    // (WSAEADDRINUSE) — trường hợp duy nhất người dùng xử lý được (đóng host cũ hoặc
+    // đổi cổng). Che sau bool để không lộ hằng winsock ra header.
+    bool lastBindAddrInUse() const { return lastBindAddrInUse_; }
+
 private:
     uint64_t sock_ = ~0ull; // SOCKET (INVALID_SOCKET) - tránh kéo winsock vào header
     bool wsaInit_ = false;
+    bool lastBindAddrInUse_ = false;
 };

@@ -71,6 +71,29 @@ bool ParseNetAddr(const std::string& s, uint16_t defaultPort, NetAddr& out) {
     return true;
 }
 
+// Thử bind từng cổng trong dải, đóng ngay khi thấy trống. Không tái dùng Open() vì
+// Open() in log mỗi lần bind hỏng — dò cổng phải im lặng. WSAStartup đếm tham chiếu
+// nên gọi tạm ở đây không ảnh hưởng các UdpSocket khác.
+uint16_t FindFreeUdpPort(uint16_t start, int count) {
+    WSADATA wsa{};
+    if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return 0;
+    uint16_t found = 0;
+    for (int i = 0; i < count && !found; ++i) {
+        const int p = int(start) + i;
+        if (p <= 0 || p > 65535) break; // hết dải cổng hợp lệ
+        const SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+        if (s == INVALID_SOCKET) continue;
+        sockaddr_in a{};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(INADDR_ANY);
+        a.sin_port = htons(uint16_t(p));
+        if (bind(s, (sockaddr*)&a, sizeof(a)) == 0) found = uint16_t(p);
+        closesocket(s);
+    }
+    WSACleanup();
+    return found;
+}
+
 UdpSocket::~UdpSocket() { Close(); }
 
 // Mở socket UDP và bind. Ghi vào sock_ CHỈ KHI mọi bước đã thành công — thất bại
@@ -80,6 +103,7 @@ UdpSocket::~UdpSocket() { Close(); }
 // là hợp lệ; mỗi lần phải có đúng một WSACleanup đối ứng, và cờ wsaInit_ bảo đảm
 // điều đó ngay cả khi Open() thất bại giữa chừng.
 bool UdpSocket::Open(uint16_t localPort) {
+    lastBindAddrInUse_ = false; // reset: chỉ nói về lần Open này
     WSADATA wsa{};
     if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
         std::printf("[UDP] WSAStartup failed.\n");
@@ -124,7 +148,16 @@ bool UdpSocket::Open(uint16_t localPort) {
     local.sin_addr.s_addr = htonl(INADDR_ANY);
     local.sin_port = htons(localPort);
     if (bind(s, (sockaddr*)&local, sizeof(local)) == SOCKET_ERROR) {
-        std::printf("[UDP] bind(:%u) failed: %d\n", localPort, WSAGetLastError());
+        const int err = WSAGetLastError();
+        // WSAEADDRINUSE là ca người dùng gặp thật: một host RemoteGame cũ còn chạy
+        // nền (cửa sổ menu bị ẩn suốt phiên share) vẫn giữ cổng. Tách riêng để tầng
+        // trên báo cách xử lý thay vì phơi số lỗi 10048.
+        lastBindAddrInUse_ = (err == WSAEADDRINUSE);
+        if (lastBindAddrInUse_)
+            std::printf("[UDP] Port %u is already in use — another RemoteGame host (or "
+                        "another program) is still listening on it.\n", localPort);
+        else
+            std::printf("[UDP] bind(:%u) failed: %d\n", localPort, err);
         closesocket(s);
         return false;
     }

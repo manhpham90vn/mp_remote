@@ -176,6 +176,12 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
     uint32_t dgLoopBusyMaxMs = 0;                            // K4: vòng Recv bận
     uint64_t kfReqUs = 0; // K3: thời điểm bắt đầu xin keyframe; 0 = không treo
 
+    // Cho tới khi đàm phán xong (onReady), phiên chưa nhận được gì — mọi số liệu 1s
+    // đều là 0 và chỉ làm rối log lúc đang thử kết nối. Bật cờ này ở onReady rồi mới
+    // in các dòng thống kê/chẩn đoán. onReady chạy trên chính thread Recv này nên bool
+    // thường là đủ.
+    bool negotiated = false;
+
     auto onDecoded = [&](const DecodedFrame& df) {
         if (!s.rendererReady.load(std::memory_order_acquire)) return;
         if (!s.renderer.RenderNV12(df.texture, df.subresource, df.width, df.height)) return;
@@ -238,6 +244,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
     cb.send = [&](std::span<const uint8_t> d) { s.sock.SendTo(opt.server, d.data(), d.size()); };
     cb.onReady = [&](const rgc::NegotiatedParams& np) {
         ackDeltaUs.store(int64_t(NowUs()) - int64_t(np.timebaseUs), std::memory_order_relaxed);
+        negotiated = true; // từ đây thống kê 1s mới có nghĩa -> mở cổng in log
         std::printf("[Client][%s] Negotiation done: H264 %ux%u @%ufps, %.1f Mbps\n",
                     s.src.name.c_str(), np.width, np.height, np.fps, np.bitrateBps / 1e6);
         s.negW.store(np.width);
@@ -408,28 +415,33 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
             const rgc::LinkWindow w = linkStats.Close(st, stBytes, rendered, now);
             const int64_t e2e = lastE2eUs.load();
 
-            std::printf("[Client][%s] %2.0f fps | %6.0f kbps | dropped %llu frame | lost %4.1f%%"
-                        " pkts | fec+%llu | RTT %.1f ms | e2e ~%.1f ms\n",
-                        s.src.name.c_str(),
-                        w.fps,
-                        w.kbps,
-                        (unsigned long long)w.framesDropped,
-                        w.lossPct,
-                        (unsigned long long)w.packetsRecovered,
-                        session.lastRttUs() / 1000.0,
-                        e2e >= 0 ? e2e / 1000.0 : 0.0);
+            // Chỉ in thống kê + cập nhật overlay khi đã kết nối (đàm phán xong). Trước
+            // đó toàn số 0.
+            if (negotiated) {
+                std::printf("[Client][%s] %2.0f fps | %6.0f kbps | dropped %llu frame | lost %4.1f%%"
+                            " pkts | fec+%llu | RTT %.1f ms | e2e ~%.1f ms\n",
+                            s.src.name.c_str(),
+                            w.fps,
+                            w.kbps,
+                            (unsigned long long)w.framesDropped,
+                            w.lossPct,
+                            (unsigned long long)w.packetsRecovered,
+                            session.lastRttUs() / 1000.0,
+                            e2e >= 0 ? e2e / 1000.0 : 0.0);
 
-            wchar_t statusBuf[160];
-            swprintf(statusBuf, 160,
-                L"%2.0f fps | %5.0f kbps | lost %4.1f%% pkts | RTT %4.1f ms | e2e ~%4.1f ms",
-                w.fps, w.kbps, w.lossPct,
-                session.lastRttUs() / 1000.0, e2e >= 0 ? e2e / 1000.0 : 0.0);
-            {
-                std::lock_guard<std::mutex> lk(s.statsMutex);
-                s.statusText = statusBuf;
+                wchar_t statusBuf[160];
+                swprintf(statusBuf, 160,
+                    L"%2.0f fps | %5.0f kbps | lost %4.1f%% pkts | RTT %4.1f ms | e2e ~%4.1f ms",
+                    w.fps, w.kbps, w.lossPct,
+                    session.lastRttUs() / 1000.0, e2e >= 0 ? e2e / 1000.0 : 0.0);
+                {
+                    std::lock_guard<std::mutex> lk(s.statsMutex);
+                    s.statusText = statusBuf;
+                }
             }
 
-            // Số liệu đó gửi ngược cho host để nó siết/nới bitrate.
+            // Số liệu đó gửi ngược cho host để nó siết/nới bitrate. Giữ nguyên nhịp kể
+            // cả trước khi in log — đây là logic giao thức, không phải log.
             session.SendFeedback(rgc::MakeFeedback(w, session.lastRttUs()));
 
             // Dòng chẩn đoán 1s (K1/K2/K4 + late/gap từ core) — đọc-và-reset mọi bộ
@@ -440,7 +452,10 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
                 const uint32_t qm = dgQMsMax.exchange(0, std::memory_order_relaxed);
                 const uint32_t ds = dgDecMsSum.exchange(0, std::memory_order_relaxed);
                 const uint32_t dm = dgDecMsMax.exchange(0, std::memory_order_relaxed);
-                std::printf("[DIAG][%s] evt=sum asm_ms=%.1f/%u q_ms=%.1f/%u dec_ms=%.1f/%u"
+                // Đọc-và-reset bộ đếm ở trên vẫn chạy để không tích lũy; chỉ hoãn IN
+                // cho tới khi kết nối xong.
+                if (negotiated)
+                    std::printf("[DIAG][%s] evt=sum asm_ms=%.1f/%u q_ms=%.1f/%u dec_ms=%.1f/%u"
                             " dq_max=%u dq_drop=%u late=%llu late_ms_avg=%.0f late_ms_max=%llu"
                             " gap_ms_max=%u loop_busy_ms_max=%u\n",
                             s.src.name.c_str(),
