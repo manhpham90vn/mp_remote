@@ -40,7 +40,7 @@
 //   (nhờ vậy test tua nhanh thời gian được, không phải sleep thật). Dùng trên MỘT
 //   thread (thread Recv của client).
 //
-// LIÊN QUAN: rgc/transport/Packetizer.h (đầu kia), rgc/control/LinkStats.h (đọc
+// LIÊN QUAN: deskhub/transport/Packetizer.h (đầu kia), deskhub/control/LinkStats.h (đọc
 //            stats() của lớp này), docs/06-phase3-transport.md §5
 // =============================================================================
 //
@@ -54,7 +54,7 @@
 //
 // Thuần C++20, không thread, không đồng hồ — thời gian bơm từ ngoài qua `nowUs`.
 // Dùng trên MỘT thread (thread Recv của client).
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 #include <cstdint>
 #include <functional>
@@ -62,7 +62,7 @@
 #include <optional>
 #include <vector>
 
-namespace rgc {
+namespace deskhub {
 
 class Reassembler {
 public:
@@ -211,4 +211,4 @@ private:
     uint32_t maxGapMs_ = 0;
 };
 
-} // namespace rgc
+} // namespace deskhub

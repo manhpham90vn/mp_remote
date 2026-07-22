@@ -155,10 +155,10 @@ bool RelaunchElevatedShare(std::span<const AgentSource> sources,
     return false;
 }
 
-bool ParseElevatedShareArgs(int argc, wchar_t** argv,
+bool ParseElevatedShareArgs(int adeskhub, wchar_t** argv,
                             std::vector<AgentSource>& outSources, AgentOptions& outOpt) {
     bool isShare = false;
-    for (int i = 1; i < argc; ++i)
+    for (int i = 1; i < adeskhub; ++i)
         if (wcscmp(argv[i], kFlagShare) == 0) isShare = true;
     if (!isShare) return false;
 
@@ -166,9 +166,9 @@ bool ParseElevatedShareArgs(int argc, wchar_t** argv,
     opt.allowInput = false;
     std::vector<AgentSource> sources;
 
-    for (int i = 1; i < argc; ++i) {
+    for (int i = 1; i < adeskhub; ++i) {
         const std::wstring a = argv[i];
-        const bool hasNext = (i + 1) < argc;
+        const bool hasNext = (i + 1) < adeskhub;
         if (a == L"--allow-input") {
             opt.allowInput = true;
         } else if (a == L"--diag-log") {

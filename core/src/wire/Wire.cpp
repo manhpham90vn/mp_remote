@@ -22,15 +22,15 @@
 //     làm đọc ngoài biên. Đây là ranh giới tin cậy của toàn bộ chương trình.
 //   - Không hàm nào ở đây giữ trạng thái giữa các lần gọi.
 //
-// LIÊN QUAN: rgc/wire/Wire.h (khai báo + giải thích từng thông điệp),
-//            rgc/wire/ByteOrder.h (PutU16/GetU32/...), docs/04-protocol.md
+// LIÊN QUAN: deskhub/wire/Wire.h (khai báo + giải thích từng thông điệp),
+//            deskhub/wire/ByteOrder.h (PutU16/GetU32/...), docs/04-protocol.md
 // =============================================================================
-#include "rgc/wire/Wire.h"
-#include "rgc/wire/ByteOrder.h"
+#include "deskhub/wire/Wire.h"
+#include "deskhub/wire/ByteOrder.h"
 
 #include <cstring>
 
-namespace rgc {
+namespace deskhub {
 
 namespace {
 
@@ -458,4 +458,4 @@ size_t ParseInputEvents(std::span<const uint8_t> payload, uint32_t& firstSeq,
     return count;
 }
 
-} // namespace rgc
+} // namespace deskhub

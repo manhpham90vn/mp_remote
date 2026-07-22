@@ -1,6 +1,6 @@
-# Remote Game Control
+# Deskhub
 
-Stream + điều khiển game từ xa. Mỗi OS **một exe duy nhất** (kiểu AnyDesk), điều
+Stream + điều khiển ứng dụng từ xa. Mỗi OS **một exe duy nhất** (kiểu AnyDesk), điều
 khiển hoàn toàn qua giao diện Win32 — không cần tham số dòng lệnh.
 
 ```
@@ -51,7 +51,7 @@ input" nằm cạnh nút Kết nối.
 
 Giai đoạn 3 đã chạy được trên 1 máy (M1+M2); còn kiểm chứng 2 máy LAN (M3/M4) — xem
 `docs/06-phase3-transport.md` §8 và tiến độ trong `docs/05-roadmap.md`. Máy host lần đầu
-cần mở firewall: `netsh advfirewall firewall add rule name="RemoteGame" dir=in action=allow protocol=udp localport=47777`.
+cần mở firewall: `netsh advfirewall firewall add rule name="Deskhub" dir=in action=allow protocol=udp localport=47777`.
 
 ## Điều khiển từ xa (giai đoạn 4)
 

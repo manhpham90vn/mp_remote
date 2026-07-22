@@ -17,7 +17,7 @@
 // =============================================================================
 #include "net/Pacer.h"
 
-#include "rgcp/Clock.h"
+#include "deskhubp/Clock.h"
 
 namespace {
 

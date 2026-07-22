@@ -37,17 +37,17 @@
 //   ngoài. Toàn bộ chạy trên MỘT thread (thread Recv của client) — không khoá,
 //   và khác HostSession, ở đây không có trường atomic nào.
 //
-// LIÊN QUAN: rgc/session/HostSession.h (đầu kia), rgc/input/InputSender.h,
-//            rgc/transport/Reassembler.h, rgc/control/LinkStats.h
+// LIÊN QUAN: deskhub/session/HostSession.h (đầu kia), deskhub/input/InputSender.h,
+//            deskhub/transport/Reassembler.h, deskhub/control/LinkStats.h
 // =============================================================================
-#include "rgc/input/InputSender.h"
-#include "rgc/wire/Wire.h"
+#include "deskhub/input/InputSender.h"
+#include "deskhub/wire/Wire.h"
 
 #include <cstdint>
 #include <functional>
 #include <span>
 
-namespace rgc {
+namespace deskhub {
 
 inline constexpr uint64_t kHelloRetryUs    = 500'000;    // phát lại HELLO/START
 inline constexpr uint64_t kHelloGiveUpUs   = 10'000'000; // bỏ cuộc nếu host im lặng
@@ -149,4 +149,4 @@ private:
     uint8_t  buf_[kMaxDatagram] = {};
 };
 
-} // namespace rgc
+} // namespace deskhub

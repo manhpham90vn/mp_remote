@@ -3,7 +3,7 @@
 // InputInjector.h — bơm input nhận được vào máy này, phía HOST (GĐ4).
 //
 // NHIỆM VỤ
-//   Đối tác của InputCapture: nhận rgc::InputEvent đã khử trùng và biến nó thành
+//   Đối tác của InputCapture: nhận deskhub::InputEvent đã khử trùng và biến nó thành
 //   thao tác thật trên máy host bằng SendInput.
 //
 // VỊ TRÍ TRONG LUỒNG DỮ LIỆU
@@ -34,8 +34,8 @@
 // MÔ HÌNH LUỒNG
 //   Apply() được gọi từ luồng Recv của AgentLoop.
 //
-// LIÊN QUAN: input/InputCapture.h (đầu kia), rgc/input/InputReceiver.h,
-//            rgc/session/HostSession.h (nơi gọi ReleaseAll), docs/07-phase4-input.md
+// LIÊN QUAN: input/InputCapture.h (đầu kia), deskhub/input/InputReceiver.h,
+//            deskhub/session/HostSession.h (nơi gọi ReleaseAll), docs/07-phase4-input.md
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -44,7 +44,7 @@
 #include <map>
 #include <set>
 
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 class InputInjector {
 public:
@@ -63,7 +63,7 @@ public:
     bool FocusTarget();
 
     // Bơm một event. Bỏ qua nếu đang tắt hoặc cửa sổ đích đã đóng.
-    void Apply(const rgc::InputEvent& e);
+    void Apply(const deskhub::InputEvent& e);
 
     // Nhả mọi phím/nút còn đang giữ (mất kết nối, kết thúc phiên, tắt input).
     void ReleaseAll();
@@ -88,7 +88,7 @@ private:
     bool TargetHasFocus();
 
     void SendKey(int32_t vk, int32_t scan, bool down);
-    void SendButton(rgc::MouseButton btn, bool down);
+    void SendButton(deskhub::MouseButton btn, bool down);
     void SendMoveAbsolute(int32_t nx, int32_t ny);
     void SendMoveRelative(int32_t dx, int32_t dy);
 
@@ -99,5 +99,5 @@ private:
     uint64_t applied_ = 0;
     uint64_t skipped_ = 0;   // event bị bỏ vì cửa sổ đích không còn foreground
     std::map<int32_t, int32_t> keysDown_;     // scancode (kèm bit E0) -> mã phím ảo
-    std::set<rgc::MouseButton> buttonsDown_;
+    std::set<deskhub::MouseButton> buttonsDown_;
 };

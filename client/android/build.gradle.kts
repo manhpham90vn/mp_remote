@@ -1,5 +1,5 @@
 // Kotlin chỉ dùng cho tầng UI (Activity, layout). Toàn bộ mạng + giải mã vẫn là
-// C++ trong libremotegame.so, không đi qua JVM.
+// C++ trong libdeskhub.so, không đi qua JVM.
 //
 // Không khai plugin org.jetbrains.kotlin.android: từ AGP 9, Kotlin được tích hợp
 // thẳng vào plugin Android, khai thêm plugin JetBrains là lỗi ("Failed to apply

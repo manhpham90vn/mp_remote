@@ -30,16 +30,16 @@
 // MÔ HÌNH LUỒNG
 //   Thuần C++20, dùng trên MỘT thread (thread Recv của host).
 //
-// LIÊN QUAN: rgc/input/InputSender.h (đầu kia), rgc/session/HostSession.h
+// LIÊN QUAN: deskhub/input/InputSender.h (đầu kia), deskhub/session/HostSession.h
 // =============================================================================
 //
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 #include <cstdint>
 #include <functional>
 #include <span>
 
-namespace rgc {
+namespace deskhub {
 
 class InputReceiver {
 public:
@@ -65,4 +65,4 @@ private:
     Stats   stats_{};
 };
 
-} // namespace rgc
+} // namespace deskhub

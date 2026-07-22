@@ -25,13 +25,13 @@
 //   SET_FOCUS có thêm quota focusRepeatsLeft_ vì nó KHÔNG được phát mãi — xem lý
 //   do ở ClientSession.h chỗ khai báo kFocusRepeats.
 //
-// LIÊN QUAN: rgc/session/ClientSession.h (máy trạng thái), HostSession.cpp (đầu kia)
+// LIÊN QUAN: deskhub/session/ClientSession.h (máy trạng thái), HostSession.cpp (đầu kia)
 // =============================================================================
-#include "rgc/session/ClientSession.h"
+#include "deskhub/session/ClientSession.h"
 
-#include "rgc/session/HostSession.h" // kSessionTimeoutUs dùng chung hai phía
+#include "deskhub/session/HostSession.h" // kSessionTimeoutUs dùng chung hai phía
 
-namespace rgc {
+namespace deskhub {
 
 void ClientSession::Start(const Hello& hello, uint64_t nowUs) {
     hello_      = hello;
@@ -210,4 +210,4 @@ void ClientSession::Die(const char* reason) {
     if (cb_.onDisconnect) cb_.onDisconnect(reason);
 }
 
-} // namespace rgc
+} // namespace deskhub

@@ -29,18 +29,18 @@
 //   Thuần C++20: không socket, không đồng hồ (thời gian bơm từ ngoài).
 //   Dùng trên MỘT thread (thread Recv của client); không tự khoá.
 //
-// LIÊN QUAN: rgc/input/InputReceiver.h (đầu kia), rgc/session/ClientSession.h
+// LIÊN QUAN: deskhub/input/InputReceiver.h (đầu kia), deskhub/session/ClientSession.h
 //            (nơi gọi Queue/Flush), docs/04-protocol.md §6
 // =============================================================================
 //
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 #include <cstdint>
 #include <deque>
 #include <functional>
 #include <span>
 
-namespace rgc {
+namespace deskhub {
 
 inline constexpr uint64_t kInputRepeatIntervalUs = 25'000; // giãn cách phát lại đuôi
 inline constexpr uint32_t kInputRepeatCount      = 2;      // số lần phát lại sau lần đầu
@@ -80,4 +80,4 @@ private:
     uint8_t  buf_[kMaxDatagram] = {};
 };
 
-} // namespace rgc
+} // namespace deskhub

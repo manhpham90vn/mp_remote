@@ -1,9 +1,9 @@
-# Can GNU make. Tu tim Visual Studio qua vswhere va nap VsDevCmd,
-# nen chay duoc tu cmd / PowerShell / Git Bash thuong (khong can Developer prompt).
+# Cần GNU make. Tự tìm Visual Studio qua vswhere và nạp VsDevCmd,
+# nên chạy được từ cmd / PowerShell / Git Bash thường (không cần Developer prompt).
 #   make            build debug
 #   make release    build release
 #   make run ARGS="notepad.exe --loopback"
-#   make test       chay core_tests (offline)
+#   make test       chạy core_tests (offline)
 #   make clean
 
 SHELL := cmd.exe
@@ -25,7 +25,7 @@ release:
 run: debug
 	out\build\x64-debug\client\windows\client.exe $(ARGS)
 
-# Test cua core: offline, khong can mang/GPU. Exit code 0 = pass.
+# Test của core: offline, không cần mạng/GPU. Exit code 0 = pass.
 test: debug
 	out\build\x64-debug\core\core_tests.exe
 

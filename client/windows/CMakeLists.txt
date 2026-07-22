@@ -7,7 +7,7 @@
 # Sau khi update driver NVIDIA hỗ trợ API 13.1, đổi bằng:
 #   cmake --preset x64-debug -DNVENC_INTERFACE_DIR="C:/Tools/Video_Codec_Interface_13.1.15/Interface"
 set(NVENC_INTERFACE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../third_party/nvenc-13.0/include/ffnvcodec"
-    CACHE PATH "Thu muc chua nvEncodeAPI.h")
+    CACHE PATH "Directory containing nvEncodeAPI.h")
 
 # Nguồn nhóm theo thư mục con: net/ (socket, pacing), capture/ (WGC + D3D11),
 # encode/ + decode/ (codec), input/, ui/ (dialog Win32). Ở gốc chỉ còn main + hai

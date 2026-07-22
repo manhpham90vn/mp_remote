@@ -11,7 +11,7 @@
             // cpptools nhận MẢNG compileCommands (từ v1.18) và gộp các entry lại, nên
             // để cả hai ở đây là hết phải chuyển qua lại. Mỗi entry tự mang compiler
             // và include path riêng nên MSVC và clang/NDK sống chung được.
-            "name": "RemoteGame (Windows + Android)",
+            "name": "Deskhub (Windows + Android)",
             "compileCommands": [
                 "${workspaceFolder}/out/build/x64-debug/compile_commands.json",
                 "${workspaceFolder}/client/android/app/.cxx/tools/debug/arm64-v8a/compile_commands.json"

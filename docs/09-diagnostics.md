@@ -35,7 +35,7 @@ diag-client-<ngày>-<giờ>.log   ← máy xem (client)
 **Android**:
 
 ```
-adb logcat -s RemoteGame > diag-android.log
+adb logcat -s Deskhub > diag-android.log
 ```
 
 Khi cần chẩn đoán: chạy đúng kịch bản tái hiện, gom **cả hai file** (host + client)
@@ -92,9 +92,9 @@ Các trường của `evt=sum` phía client:
 
 ## 6. Vị trí code
 
-- Core: `rgc/transport/Reassembler.h` — `FrameDropInfo`/`onFrameDrop`, thống kê
+- Core: `deskhub/transport/Reassembler.h` — `FrameDropInfo`/`onFrameDrop`, thống kê
   `latePackets`/nghĩa địa, `TakeMaxGapMs()`, `Frame::firstSeenUs`;
-  `rgc/control/LinkStats.h` — `LinkWindow::latePackets/lateMsAvg/lateMsMax`.
+  `deskhub/control/LinkStats.h` — `LinkWindow::latePackets/lateMsAvg/lateMsMax`.
 - Windows: `client/windows/Diag.h` (helper `DiagAtomicMax`), `AgentLoop.cpp` (H1–H3),
   `ClientLoop.cpp` (K1–K4 + nối core).
 - Xuất log ra file: `client/windows/DiagLog.h/.cpp` (`DiagLogRedirect`, đặt tên theo

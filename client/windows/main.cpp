@@ -61,11 +61,11 @@ int main() {
     // ElevatedShare.h): nhận lại nguồn + thông số qua dòng lệnh và vào thẳng phiên
     // share, khỏi bắt người dùng chọn nguồn lần hai. Xong phiên thì về main menu
     // như một lần chạy bình thường.
-    int wargc = 0;
-    if (wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &wargc)) {
+    int wadeskhub = 0;
+    if (wchar_t** wargv = CommandLineToArgvW(GetCommandLineW(), &wadeskhub)) {
         std::vector<AgentSource> sources;
         AgentOptions opt;
-        const bool elevatedShare = ParseElevatedShareArgs(wargc, wargv, sources, opt);
+        const bool elevatedShare = ParseElevatedShareArgs(wadeskhub, wargv, sources, opt);
         LocalFree(wargv);
         if (elevatedShare) {
             // Instance này LÀ phiên host thật. Redirect của shell gốc không với tới

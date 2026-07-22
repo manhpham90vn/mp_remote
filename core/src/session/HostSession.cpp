@@ -21,12 +21,12 @@
 //   được phiên). Vì thế BYE trả về false dù nó là gói hoàn toàn hợp lệ: phiên vừa
 //   đóng, cập nhật peer theo nó là vô nghĩa.
 //
-// LIÊN QUAN: rgc/session/HostSession.h (máy trạng thái + lý do thiết kế),
+// LIÊN QUAN: deskhub/session/HostSession.h (máy trạng thái + lý do thiết kế),
 //            ClientSession.cpp (đầu kia)
 // =============================================================================
-#include "rgc/session/HostSession.h"
+#include "deskhub/session/HostSession.h"
 
-namespace rgc {
+namespace deskhub {
 
 bool HostSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
     const auto h = ParseCommonHeader(pkt);
@@ -151,4 +151,4 @@ void HostSession::Disconnect() {
     if (cb_.onDisconnect) cb_.onDisconnect(); // caller nhả hết phím đang giữ
 }
 
-} // namespace rgc
+} // namespace deskhub

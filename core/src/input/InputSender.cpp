@@ -18,13 +18,13 @@
 //   từng InputEvent. Mọi phép tính chỉ số trong file này đều dựa vào bất biến đó,
 //   nên mỗi lần pop_front phải ++firstSeq_ đi kèm.
 //
-// LIÊN QUAN: rgc/input/InputSender.h (chính sách + lý do), InputReceiver.cpp
+// LIÊN QUAN: deskhub/input/InputSender.h (chính sách + lý do), InputReceiver.cpp
 // =============================================================================
-#include "rgc/input/InputSender.h"
+#include "deskhub/input/InputSender.h"
 
 #include <algorithm>
 
-namespace rgc {
+namespace deskhub {
 
 namespace {
 // Giữ đủ lịch sử cho redundancy + một batch; cắt bớt để hàng đợi không phình.
@@ -115,4 +115,4 @@ void InputSender::Reset() {
     lastSendUs_ = 0;
 }
 
-} // namespace rgc
+} // namespace deskhub

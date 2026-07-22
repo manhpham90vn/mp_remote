@@ -13,5 +13,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "RemoteGameAndroid"
+rootProject.name = "DeskhubAndroid"
 include(":app")

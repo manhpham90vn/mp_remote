@@ -25,7 +25,7 @@
 //
 // LIÊN QUAN: StreamActivity.kt (màn hình tiếp theo), NativeClient.kt (listSources)
 // =============================================================================
-package com.rgc.remotegame
+package com.deskhub.app
 
 import android.content.Context
 import android.content.Intent
@@ -74,10 +74,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val prefs = getSharedPreferences("rgc", Context.MODE_PRIVATE)
+        val prefs = getSharedPreferences("deskhub", Context.MODE_PRIVATE)
 
         // Vẫn cho chạy thẳng từ adb để test nhanh (bỏ qua bước chọn nguồn):
-        //   am start -n com.rgc.remotegame/.MainActivity --es addr 10.0.2.2:47777
+        //   am start -n com.deskhub.app/.MainActivity --es addr 10.0.2.2:47777
         intent?.getStringExtra("addr")?.let { addr ->
             intent.removeExtra("addr") // chỉ dùng một lần, quay lại không tự nhảy nữa
             openStream(addr, 0)

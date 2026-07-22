@@ -41,7 +41,7 @@
 namespace {
 
 // Tên định danh rule trong danh sách firewall. Remove/Item tra theo đúng tên này.
-constexpr wchar_t kRuleName[] = L"RemoteGame (host)";
+constexpr wchar_t kRuleName[] = L"Deskhub (host)";
 
 // Ba profile thật. NET_FW_PROFILE2_ALL (0x7fffffff) cũng được nhưng dùng tổ hợp bit
 // tường minh để get_Profiles trả về đúng giá trị này, so sánh cho gọn.
@@ -165,7 +165,7 @@ bool AddOwnRule(INetFwRules* rules, const std::wstring& exe) {
 
     bool ok = false;
     BSTR name = SysAllocString(kRuleName);
-    BSTR desc = SysAllocString(L"Allow incoming connections for RemoteGame host.");
+    BSTR desc = SysAllocString(L"Allow incoming connections for Deskhub host.");
     BSTR app  = SysAllocString(exe.c_str());
     if (name && app) {
         rule->put_Name(name);

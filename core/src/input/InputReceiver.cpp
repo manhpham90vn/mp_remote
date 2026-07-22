@@ -12,11 +12,11 @@
 //      chạy trên đường nóng của mọi thao tác chuột/phím nên không cấp phát động;
 //      kMaxInputEvents được suy từ MTU nên một gói hợp lệ không bao giờ vượt quá.
 //
-// LIÊN QUAN: rgc/input/InputReceiver.h (cơ chế + lý do), InputSender.cpp
+// LIÊN QUAN: deskhub/input/InputReceiver.h (cơ chế + lý do), InputSender.cpp
 // =============================================================================
-#include "rgc/input/InputReceiver.h"
+#include "deskhub/input/InputReceiver.h"
 
-namespace rgc {
+namespace deskhub {
 
 // Giải một gói INPUT_EVENT rồi phát từng event chưa từng thấy qua `apply`.
 // Trả true nếu gói hợp lệ — KỂ CẢ khi mọi event trong đó đều là bản lặp và không
@@ -47,4 +47,4 @@ void InputReceiver::Reset() {
     stats_ = Stats{};
 }
 
-} // namespace rgc
+} // namespace deskhub

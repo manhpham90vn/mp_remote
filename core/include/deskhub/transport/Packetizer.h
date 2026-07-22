@@ -28,16 +28,16 @@
 //   buf_/parity_ là thành viên chứ không phải biến cục bộ để tránh cấp phát trên
 //   đường nóng — cái giá là mỗi thread phải có Packetizer riêng của nó.
 //
-// LIÊN QUAN: rgc/transport/Reassembler.h (đầu kia), rgc/wire/Wire.h,
+// LIÊN QUAN: deskhub/transport/Reassembler.h (đầu kia), deskhub/wire/Wire.h,
 //            docs/06-phase3-transport.md
 // =============================================================================
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 #include <cstdint>
 #include <functional>
 #include <span>
 
-namespace rgc {
+namespace deskhub {
 
 class Packetizer {
 public:
@@ -66,4 +66,4 @@ private:
     uint8_t  parity_[kFecLenPrefix + kMaxVideoPayload] = {};
 };
 
-} // namespace rgc
+} // namespace deskhub

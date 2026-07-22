@@ -36,7 +36,7 @@
 //      không cache thì client vào xem màn hình tĩnh sẽ đen VĨNH VIỄN.
 //
 // LIÊN QUAN: AgentLoop.h (AgentSource/AgentOptions), ClientLoop.cpp (phía đối
-//            diện), rgc/session/HostSession.h, rgc/transport/Packetizer.h,
+//            diện), deskhub/session/HostSession.h, deskhub/transport/Packetizer.h,
 //            net/Pacer.h, docs/06-phase3-transport.md §4
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
@@ -59,14 +59,14 @@
 #include "input/InputInjector.h"
 #include "encode/IVideoEncoder.h"
 #include "net/NetInfo.h"
-#include "rgcp/Clock.h"
+#include "deskhubp/Clock.h"
 #include "net/UdpSocket.h"
 #include "capture/WindowCapture.h"
 #include "Diag.h"
 
-#include "rgc/control/BitrateController.h"
-#include "rgc/session/HostSession.h"
-#include "rgc/transport/Packetizer.h"
+#include "deskhub/control/BitrateController.h"
+#include "deskhub/session/HostSession.h"
+#include "deskhub/transport/Packetizer.h"
 
 namespace {
 
@@ -80,11 +80,11 @@ BOOL WINAPI CtrlHandler(DWORD type) {
     return FALSE;
 }
 
-const char* StateName(rgc::HostSession::State s) {
+const char* StateName(deskhub::HostSession::State s) {
     switch (s) {
-    case rgc::HostSession::State::Idle:      return "IDLE";
-    case rgc::HostSession::State::Ready:     return "READY";
-    case rgc::HostSession::State::Streaming: return "STREAMING";
+    case deskhub::HostSession::State::Idle:      return "IDLE";
+    case deskhub::HostSession::State::Ready:     return "READY";
+    case deskhub::HostSession::State::Streaming: return "STREAMING";
     }
     return "?";
 }
@@ -113,9 +113,9 @@ struct SourcePipeline {
 
     WindowCapture capture;
     InputInjector injector;                    // chỉ thread Recv chạm
-    std::unique_ptr<rgc::HostSession> session; // tạo sau khi biết kích thước nguồn
-    rgc::StreamParams offer;                   // chỉ thread Recv chạm
-    rgc::Packetizer   packetizer;              // chỉ thread FrameArrived chạm
+    std::unique_ptr<deskhub::HostSession> session; // tạo sau khi biết kích thước nguồn
+    deskhub::StreamParams offer;                   // chỉ thread Recv chạm
+    deskhub::Packetizer   packetizer;              // chỉ thread FrameArrived chạm
 
     // --- Chia sẻ giữa thread FrameArrived và thread Recv ---
     std::atomic<uint32_t> srcW{0}, srcH{0};       // kích thước NÉN (đã làm chẵn)
@@ -156,7 +156,7 @@ struct SourcePipeline {
     // --- Congestion control, chỉ thread Recv chạm ---
     // Policy thuần ở core; curBitrateBps/wantFec ở trên là bản sao atomic cho thread
     // FrameArrived đọc (nó không được chạm vào rate).
-    rgc::BitrateController rate;
+    deskhub::BitrateController rate;
 
     // --- Thống kê cửa sổ 1s, chỉ thread Recv chạm ---
     uint32_t lastCaptured = 0;
@@ -210,8 +210,8 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         std::printf("[Agent] No source selected.\n");
         return 1;
     }
-    if (sources.size() > rgc::kMaxSources) {
-        std::printf("[Agent] At most %zu sources can be shared at once.\n", rgc::kMaxSources);
+    if (sources.size() > deskhub::kMaxSources) {
+        std::printf("[Agent] At most %zu sources can be shared at once.\n", deskhub::kMaxSources);
         return 1;
     }
 
@@ -247,11 +247,11 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             wchar_t m[512];
             swprintf(m, 512,
                      L"Cannot start sharing: no free UDP port found from %u to %u.\n\n"
-                     L"Several RemoteGame hosts may still be running in the background "
+                     L"Several Deskhub hosts may still be running in the background "
                      L"(their windows stay hidden while sharing). Close them from Task "
                      L"Manager (client.exe) and try again.",
                      unsigned(opt.port), unsigned(opt.port) + kPortTries - 1);
-            MessageBoxW(nullptr, m, L"RemoteGame", MB_OK | MB_ICONWARNING);
+            MessageBoxW(nullptr, m, L"Deskhub", MB_OK | MB_ICONWARNING);
             return 1;
         }
     }
@@ -298,7 +298,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         // NAL vừa nén xong (thread FrameArrived của nguồn này) -> cắt gói -> UDP.
         auto onPacket = [p, &sock](const uint8_t* data, size_t size, uint64_t tsUs,
                                    bool keyframe) {
-            if (!p->session || p->session->state() != rgc::HostSession::State::Streaming) return;
+            if (!p->session || p->session->state() != deskhub::HostSession::State::Streaming) return;
             const uint64_t pp = p->peerPacked.load(std::memory_order_acquire);
             if (!pp) return;
             const NetAddr peer = NetAddr::Unpack(pp);
@@ -501,7 +501,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             p->injector.SetEnabled(false);
         }
 
-        rgc::HostCallbacks cb;
+        deskhub::HostCallbacks cb;
         cb.send = [&sock, &replyAddr](std::span<const uint8_t> d) {
             sock.SendTo(replyAddr, d.data(), d.size());
         };
@@ -510,7 +510,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             std::printf("[Agent][%s] Client START — beginning video push.\n", p->name.c_str());
         };
         cb.onKeyframeRequest = [p] { p->forceIdr.store(true); };
-        cb.onInput = [p](const rgc::InputEvent& e) { p->injector.Apply(e); };
+        cb.onInput = [p](const deskhub::InputEvent& e) { p->injector.Apply(e); };
         // Client chuyển cửa sổ preview -> kéo đúng cửa sổ nguồn đó lên foreground.
         // Chia sẻ nhiều nguồn thì chỉ một cửa sổ được foreground, mà SendInput bơm
         // vào cửa sổ foreground; không có bước này thì client xem N nguồn nhưng chỉ
@@ -534,11 +534,11 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         // GD5 congestion control, RIÊNG từng nguồn: hai nguồn có thể đi cùng một
         // đường mạng nhưng bitrate của chúng độc lập nhau, và client có thể chỉ
         // đang xem một trong hai.
-        // GD5 congestion control: policy nằm ở rgc::BitrateController (core, test
+        // GD5 congestion control: policy nằm ở deskhub::BitrateController (core, test
         // được offline). Ở đây chỉ còn phần dính thiết bị — đẩy quyết định xuống
         // encoder, cập nhật atomic cho thread FrameArrived, và in log.
-        cb.onFeedback = [p](const rgc::Feedback& fb) {
-            const rgc::BitrateDecision d = p->rate.Update(fb, NowUs());
+        cb.onFeedback = [p](const deskhub::Feedback& fb) {
+            const deskhub::BitrateDecision d = p->rate.Update(fb, NowUs());
 
             if (d.fecToggled) {
                 p->wantFec.store(d.fecEnabled, std::memory_order_relaxed);
@@ -561,7 +561,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             }
         };
 
-        p->session = std::make_unique<rgc::HostSession>(cb, p->offer);
+        p->session = std::make_unique<deskhub::HostSession>(cb, p->offer);
         p->netReady.store(true, std::memory_order_release);
     }
 
@@ -587,7 +587,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
     //   4. Tick mọi phiên + in thống kê mỗi giây.
     //
     // Một cửa sổ đóng KHÔNG giết cả phiên: chỉ dừng khi không còn nguồn nào sống.
-    uint8_t buf[rgc::kMaxDatagram];
+    uint8_t buf[deskhub::kMaxDatagram];
     uint64_t lastStatUs = NowUs();
     bool anyFailed = false;
     // H3: thời gian BẬN dài nhất của một vòng Recv trong cửa sổ 1s (không tính lúc
@@ -611,27 +611,27 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         if (n > 0) {
             replyAddr = from;
             const auto span = std::span<const uint8_t>(buf, size_t(n));
-            const auto h = rgc::ParseCommonHeader(span);
-            if (h && h->type == rgc::MsgType::ListSources) {
+            const auto h = deskhub::ParseCommonHeader(span);
+            if (h && h->type == deskhub::MsgType::ListSources) {
                 // Chỉ liệt kê nguồn còn sống, kèm kích thước hiện tại.
-                std::vector<rgc::SourceInfo> infos;
+                std::vector<deskhub::SourceInfo> infos;
                 for (SourcePipeline* p : live) {
                     if (p->failed.load() || p->capture.Closed()) continue;
-                    rgc::SourceInfo si;
+                    deskhub::SourceInfo si;
                     si.sourceId = p->sourceId;
                     si.width    = uint16_t(p->srcW.load());
                     si.height   = uint16_t(p->srcH.load());
                     si.name     = p->name;
                     infos.push_back(std::move(si));
                 }
-                const size_t sn = rgc::BuildSourceList(buf, infos);
+                const size_t sn = deskhub::BuildSourceList(buf, infos);
                 if (sn) sock.SendTo(from, buf, sn);
             } else if (h) {
                 // HELLO chưa có sessionId -> định tuyến theo sourceId. Mọi gói khác
                 // đã mang sessionId -> tìm phiên khớp.
                 SourcePipeline* dst = nullptr;
-                if (h->type == rgc::MsgType::Hello) {
-                    const auto m = rgc::ParseHello(rgc::PayloadOf(span));
+                if (h->type == deskhub::MsgType::Hello) {
+                    const auto m = deskhub::ParseHello(deskhub::PayloadOf(span));
                     if (m)
                         for (SourcePipeline* p : live)
                             if (p->sourceId == m->sourceId) dst = p;
@@ -679,10 +679,10 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                 p->offer.bitrateBps = p->curBitrateBps.load(std::memory_order_relaxed);
                 p->session->SetOffer(p->offer); // HELLO phát lại sau phải mang số mới
                 const uint64_t pp = p->peerPacked.load(std::memory_order_acquire);
-                if (pp && p->session->state() == rgc::HostSession::State::Streaming) {
-                    rgc::Reconfig rc{p->offer.width, p->offer.height, p->offer.bitrateBps};
-                    uint8_t rbuf[rgc::kMaxDatagram];
-                    const size_t rn = rgc::BuildReconfig(rbuf, p->session->sessionId(), rc);
+                if (pp && p->session->state() == deskhub::HostSession::State::Streaming) {
+                    deskhub::Reconfig rc{p->offer.width, p->offer.height, p->offer.bitrateBps};
+                    uint8_t rbuf[deskhub::kMaxDatagram];
+                    const size_t rn = deskhub::BuildReconfig(rbuf, p->session->sessionId(), rc);
                     if (rn) sock.SendTo(NetAddr::Unpack(pp), rbuf, rn);
                     p->forceIdr.store(true);
                 }
@@ -701,7 +701,7 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             const bool wantIdrFlush  = p->forceIdr.load() && sinceFrameUs > 200'000;
             const bool wantKeepalive = sinceFrameUs > 500'000 &&
                                        now - p->lastKeepaliveUs >= 500'000;
-            if (p->session->state() == rgc::HostSession::State::Streaming &&
+            if (p->session->state() == deskhub::HostSession::State::Streaming &&
                 p->haveCached.load(std::memory_order_acquire) &&
                 (wantIdrFlush || wantKeepalive)) {
                 std::lock_guard<std::mutex> lk(p->encMutex);
@@ -773,11 +773,11 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         p->injector.ReleaseAll(); // thoát giữa lúc client đang giữ phím -> nhả ra
 
         // Chia tay tử tế: báo BYE cho client nếu còn phiên.
-        if (p->session->state() != rgc::HostSession::State::Idle) {
+        if (p->session->state() != deskhub::HostSession::State::Idle) {
             const uint64_t pp = p->peerPacked.load();
             if (pp) {
-                uint8_t bye[rgc::kCommonHeaderSize];
-                const size_t bn = rgc::BuildBye(bye, p->session->sessionId());
+                uint8_t bye[deskhub::kCommonHeaderSize];
+                const size_t bn = deskhub::BuildBye(bye, p->session->sessionId());
                 if (bn) sock.SendTo(NetAddr::Unpack(pp), bye, bn);
             }
         }

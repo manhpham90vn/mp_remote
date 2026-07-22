@@ -80,13 +80,13 @@ bool ForceForeground(HWND w) {
     return ok;
 }
 
-DWORD ButtonFlag(rgc::MouseButton b, bool down) {
+DWORD ButtonFlag(deskhub::MouseButton b, bool down) {
     switch (b) {
-    case rgc::MouseButton::Left:   return down ? MOUSEEVENTF_LEFTDOWN   : MOUSEEVENTF_LEFTUP;
-    case rgc::MouseButton::Right:  return down ? MOUSEEVENTF_RIGHTDOWN  : MOUSEEVENTF_RIGHTUP;
-    case rgc::MouseButton::Middle: return down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
-    case rgc::MouseButton::X1:
-    case rgc::MouseButton::X2:     return down ? MOUSEEVENTF_XDOWN      : MOUSEEVENTF_XUP;
+    case deskhub::MouseButton::Left:   return down ? MOUSEEVENTF_LEFTDOWN   : MOUSEEVENTF_LEFTUP;
+    case deskhub::MouseButton::Right:  return down ? MOUSEEVENTF_RIGHTDOWN  : MOUSEEVENTF_RIGHTUP;
+    case deskhub::MouseButton::Middle: return down ? MOUSEEVENTF_MIDDLEDOWN : MOUSEEVENTF_MIDDLEUP;
+    case deskhub::MouseButton::X1:
+    case deskhub::MouseButton::X2:     return down ? MOUSEEVENTF_XDOWN      : MOUSEEVENTF_XUP;
     }
     return 0;
 }
@@ -139,19 +139,19 @@ void InputInjector::SendKey(int32_t vk, int32_t scan, bool down) {
     if (scan & 0xFF) {
         in.ki.wScan = WORD(scan & 0xFF);
         in.ki.dwFlags |= KEYEVENTF_SCANCODE;
-        if (scan & rgc::kScanExtended) in.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
+        if (scan & deskhub::kScanExtended) in.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
     } else {
         in.ki.wVk = WORD(vk); // client không gửi được scancode -> lùi về mã phím ảo
     }
     SendInput(1, &in, sizeof(INPUT));
 }
 
-void InputInjector::SendButton(rgc::MouseButton btn, bool down) {
+void InputInjector::SendButton(deskhub::MouseButton btn, bool down) {
     INPUT in{};
     in.type = INPUT_MOUSE;
     in.mi.dwFlags = ButtonFlag(btn, down);
-    if (btn == rgc::MouseButton::X1) in.mi.mouseData = XBUTTON1;
-    if (btn == rgc::MouseButton::X2) in.mi.mouseData = XBUTTON2;
+    if (btn == deskhub::MouseButton::X1) in.mi.mouseData = XBUTTON1;
+    if (btn == deskhub::MouseButton::X2) in.mi.mouseData = XBUTTON2;
     if (in.mi.dwFlags) SendInput(1, &in, sizeof(INPUT));
 }
 
@@ -226,14 +226,14 @@ bool InputInjector::TargetHasFocus() {
     return ok;
 }
 
-void InputInjector::Apply(const rgc::InputEvent& e) {
+void InputInjector::Apply(const deskhub::InputEvent& e) {
     if (!enabled_) return;
     if (!monitor_ && (!target_ || !IsWindow(target_))) return;
     if (!TargetHasFocus()) { ++skipped_; return; }
     ++applied_;
 
     switch (e.type) {
-    case rgc::InputType::Key: {
+    case deskhub::InputType::Key: {
         const bool down = e.state != 0;
         // Nhớ theo scancode để ReleaseAll nhả đúng phím đã bơm.
         if (down) keysDown_[e.b] = e.a;
@@ -241,19 +241,19 @@ void InputInjector::Apply(const rgc::InputEvent& e) {
         SendKey(e.a, e.b, down);
         break;
     }
-    case rgc::InputType::MouseMove:
+    case deskhub::InputType::MouseMove:
         if (e.absolute) SendMoveAbsolute(e.a, e.b);
         else            SendMoveRelative(e.a, e.b);
         break;
-    case rgc::InputType::MouseButton: {
-        const auto btn = rgc::MouseButton(e.a);
+    case deskhub::InputType::MouseButton: {
+        const auto btn = deskhub::MouseButton(e.a);
         const bool down = e.state != 0;
         if (down) buttonsDown_.insert(btn);
         else      buttonsDown_.erase(btn);
         SendButton(btn, down);
         break;
     }
-    case rgc::InputType::MouseWheel: {
+    case deskhub::InputType::MouseWheel: {
         INPUT in{};
         in.type = INPUT_MOUSE;
         in.mi.dwFlags = MOUSEEVENTF_WHEEL;
@@ -290,8 +290,8 @@ int InputInjector::SelfTest(HWND target, const char* text) {
         const int32_t scan = int32_t(MapVirtualKeyW(UINT(vk), MAPVK_VK_TO_VSC));
         if (!scan) continue;
 
-        rgc::InputEvent e;
-        e.type = rgc::InputType::Key;
+        deskhub::InputEvent e;
+        e.type = deskhub::InputType::Key;
         if (needShift) {
             e.a = VK_SHIFT;
             e.b = int32_t(MapVirtualKeyW(VK_SHIFT, MAPVK_VK_TO_VSC));

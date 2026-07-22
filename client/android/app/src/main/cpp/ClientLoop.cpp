@@ -41,11 +41,11 @@
 #include <memory>
 
 #include "Log.h"
-#include "rgcp/Clock.h"
+#include "deskhubp/Clock.h"
 
-#include "rgc/control/LinkStats.h"
-#include "rgc/session/ClientSession.h"
-#include "rgc/wire/Wire.h"
+#include "deskhub/control/LinkStats.h"
+#include "deskhub/session/ClientSession.h"
+#include "deskhub/wire/Wire.h"
 
 ClientLoop::~ClientLoop() { Stop(); }
 
@@ -149,7 +149,7 @@ void ClientLoop::DecodeThread() {
         if (quit_.load()) break;
 
         // 2) Lấy frame kế tiếp. Chờ có giới hạn để còn quay lại phục vụ (1).
-        rgc::Reassembler::Frame f;
+        deskhub::Reassembler::Frame f;
         {
             std::unique_lock<std::mutex> lk(decMutex_);
             // wait_for chứ không wait: phải tỉnh dậy định kỳ để quay lại bước (1)
@@ -250,20 +250,20 @@ void ClientLoop::DecodeThread() {
 // nên chúng đọc/ghi trạng thái thoải mái, chỉ cần khoá khi chạm vào thứ mà thread
 // khác cũng chạm.
 void ClientLoop::NetThread() {
-    std::unique_ptr<rgc::Reassembler> reasm; // tạo sau khi biết fps đàm phán
+    std::unique_ptr<deskhub::Reassembler> reasm; // tạo sau khi biết fps đàm phán
 
-    rgc::ClientCallbacks cb;
+    deskhub::ClientCallbacks cb;
     cb.send = [this](std::span<const uint8_t> d) {
         sock_.SendTo(server_, d.data(), d.size());
     };
-    cb.onReady = [this](const rgc::NegotiatedParams& np) {
+    cb.onReady = [this](const deskhub::NegotiatedParams& np) {
         ackDeltaUs_.store(int64_t(NowUs()) - int64_t(np.timebaseUs), std::memory_order_relaxed);
         LOGI("[Client] Negotiation done: H264 %ux%u @%ufps, %.1f Mbps",
              np.width, np.height, np.fps, np.bitrateBps / 1e6);
         negW_.store(np.width);
         negH_.store(np.height);
     };
-    cb.onReconfig = [this](const rgc::NegotiatedParams& np) {
+    cb.onReconfig = [this](const deskhub::NegotiatedParams& np) {
         LOGI("[Client] Host reconfigured: %ux%u, %.1f Mbps",
              np.width, np.height, np.bitrateBps / 1e6);
         negW_.store(np.width);
@@ -291,13 +291,13 @@ void ClientLoop::NetThread() {
         }
         quit_.store(true);
     };
-    rgc::ClientSession session(cb);
+    deskhub::ClientSession session(cb);
 
-    rgc::Hello hello;
+    deskhub::Hello hello;
     // clientId chỉ cần phân biệt được hai client, không cần bí mật hay bền vững —
     // lấy đồng hồ micro-giây là đủ ngẫu nhiên cho mục đích đó.
     hello.clientId   = uint32_t(NowUs());
-    hello.codecMask  = rgc::kCodecMaskH264;
+    hello.codecMask  = deskhub::kCodecMaskH264;
     // Chưa biết kích thước surface lúc gửi HELLO (và đằng nào host cũng stream đúng
     // kích thước cửa sổ nguồn) -> khai trần rộng rãi, để host tự quyết.
     hello.maxWidth   = 3840;
@@ -307,12 +307,12 @@ void ClientLoop::NetThread() {
     hello.sourceId   = sourceId_;
     session.Start(hello, NowUs());
 
-    uint8_t buf[rgc::kMaxDatagram];
+    uint8_t buf[deskhub::kMaxDatagram];
     uint64_t stBytes = 0;
-    rgc::LinkStats linkStats(NowUs());
+    deskhub::LinkStats linkStats(NowUs());
 
     // Bộ đếm chẩn đoán cửa sổ 1s, chỉ thread Net chạm (xem docs/09). Trên Android
-    // không có cờ RGC_DIAG — logcat lọc theo tag được nên [DIAG] bật luôn.
+    // không có cờ DESKHUB_DIAG — logcat lọc theo tag được nên [DIAG] bật luôn.
     uint32_t dgAsmMsSum = 0, dgAsmMsMax = 0, dgAsmCount = 0; // t_asm: mảnh đầu → ghép xong
     uint32_t dgDqDrop = 0;                                   // frame vứt vì hàng đợi đầy
     uint32_t dgLoopBusyMaxMs = 0;                            // vòng Net bận nhất
@@ -331,22 +331,22 @@ void ClientLoop::NetThread() {
 
         if (n > 0) {
             const auto span = std::span<const uint8_t>(buf, size_t(n));
-            const auto h = rgc::ParseCommonHeader(span);
+            const auto h = deskhub::ParseCommonHeader(span);
             // Kênh Video đi thẳng vào Reassembler, KHÔNG qua ClientSession — đó là
             // đường nóng, mỗi giây hàng nghìn gói. ClientSession chỉ được báo bằng
             // NotifyVideoPacket để nuôi timeout và thoát khỏi trạng thái Starting.
-            if (h && h->chan == rgc::Chan::Video) {
+            if (h && h->chan == deskhub::Chan::Video) {
                 // sessionId != 0 loại được gói lạc trước khi phiên hình thành.
                 if (h->sessionId == session.sessionId() && session.sessionId() != 0) {
-                    const auto pl = rgc::PayloadOf(span);
+                    const auto pl = deskhub::PayloadOf(span);
                     // Dựng Reassembler lười: nó cần fps đàm phán để đặt mốc timeout,
                     // mà fps chỉ biết sau khi HELLO_ACK về.
                     if (!reasm) {
                         const uint32_t fps = session.params().fps ? session.params().fps : 60;
-                        reasm = std::make_unique<rgc::Reassembler>(1'000'000 / fps);
+                        reasm = std::make_unique<deskhub::Reassembler>(1'000'000 / fps);
                         // Bản khám nghiệm từng frame bị khai tử (docs/09): pos=tail
                         // là dấu vân tay của burst — chùm mất nằm ở đuôi frame.
-                        reasm->onFrameDrop = [](const rgc::Reassembler::FrameDropInfo& d) {
+                        reasm->onFrameDrop = [](const deskhub::Reassembler::FrameDropInfo& d) {
                             static const char* const kReason[] =
                                 {"timeout", "overtaken", "evicted", "pre_idr"};
                             const char* pos = "-";
@@ -362,13 +362,13 @@ void ClientLoop::NetThread() {
                                  pos, d.idr ? 1 : 0, d.waitedMs, d.bytesGot);
                         };
                     }
-                    if (h->type == rgc::MsgType::FecPacket) {
-                        if (const auto v = rgc::ParseFecPacket(*h, pl)) {
+                    if (h->type == deskhub::MsgType::FecPacket) {
+                        if (const auto v = deskhub::ParseFecPacket(*h, pl)) {
                             session.NotifyVideoPacket(now);
                             reasm->PushFec(*v, now);
                             stBytes += v->parity.size();
                         }
-                    } else if (const auto v = rgc::ParseVideoPacket(*h, pl)) {
+                    } else if (const auto v = deskhub::ParseVideoPacket(*h, pl)) {
                         session.NotifyVideoPacket(now);
                         reasm->Push(*v, now);
                         stBytes += v->payload.size();
@@ -432,18 +432,18 @@ void ClientLoop::NetThread() {
         if (queueOverflow_.exchange(false, std::memory_order_acq_rel)) requestKf("q_overflow");
 
         session.Tick(now);
-        if (session.state() == rgc::ClientSession::State::Dead) break;
+        if (session.state() == deskhub::ClientSession::State::Dead) break;
 
-        phase_.store(session.state() == rgc::ClientSession::State::Streaming
+        phase_.store(session.state() == deskhub::ClientSession::State::Streaming
                          ? Phase::Streaming
                          : Phase::Connecting,
                      std::memory_order_release);
 
         // Mỗi giây: chốt cửa sổ thống kê, in log, cập nhật overlay, gửi FEEDBACK.
         if (linkStats.Due(now)) {
-            const auto st = reasm ? reasm->stats() : rgc::Reassembler::Stats{};
+            const auto st = reasm ? reasm->stats() : deskhub::Reassembler::Stats{};
             const uint32_t rendered = stRendered_.exchange(0, std::memory_order_relaxed);
-            const rgc::LinkWindow w = linkStats.Close(st, stBytes, rendered, now);
+            const deskhub::LinkWindow w = linkStats.Close(st, stBytes, rendered, now);
             const int64_t e2e = lastE2eUs_.load();
 
             LOGI("[Client] %2.0f fps | %6.0f kbps | dropped %" PRIu64 " frame | lost %4.1f%% pkts"
@@ -479,7 +479,7 @@ void ClientLoop::NetThread() {
                 statusLine_ = ui;
             }
 
-            session.SendFeedback(rgc::MakeFeedback(w, session.lastRttUs()));
+            session.SendFeedback(deskhub::MakeFeedback(w, session.lastRttUs()));
 
             // Dòng chẩn đoán 1s (docs/09) — đọc-và-reset mọi bộ đếm cửa sổ.
             // late= là con số phân xử "mất thật vs tới muộn" (docs/06 §7b).

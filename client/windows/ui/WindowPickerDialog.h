@@ -19,7 +19,7 @@
 //
 // GĐ6: CHỌN ĐƯỢC NHIỀU NGUỒN CÙNG LÚC
 //   Mỗi nguồn thành một phiên độc lập với encoder và bitrate riêng — xem ghi chú
-//   về kMaxSources trong rgc/wire/Wire.h.
+//   về kMaxSources trong deskhub/wire/Wire.h.
 //
 // LIÊN QUAN: ui/MainMenuWindow.h (nơi mở hộp thoại này), capture/WindowFinder.h
 //            (nguồn danh sách cửa sổ), AgentLoop.h (AgentSource),

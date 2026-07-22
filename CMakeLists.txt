@@ -4,7 +4,7 @@
 # Windows: mở thư mục này bằng Visual Studio (Open Folder) hoặc từ Developer prompt:
 #   cmake --preset x64-debug && cmake --build --preset x64-debug
 cmake_minimum_required(VERSION 3.25)
-project(RemoteGame LANGUAGES CXX)
+project(Deskhub LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

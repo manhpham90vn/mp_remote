@@ -14,7 +14,7 @@
 // GĐ6: XEM NHIỀU NGUỒN CÙNG LÚC
 //   Mỗi nguồn là một phiên HOÀN TOÀN độc lập: socket riêng, ClientSession riêng,
 //   cửa sổ preview riêng, cặp thread Recv+Decode riêng. Không dùng streamId chung
-//   một phiên — lý do đầy đủ ở chú thích của rgc::SourceInfo trong Wire.h.
+//   một phiên — lý do đầy đủ ở chú thích của deskhub::SourceInfo trong Wire.h.
 //   `sources` rỗng = xem nguồn 0, giữ đường cũ chạy được với host chỉ chia sẻ một thứ.
 //
 // VÌ SAO QueryHostSources TÁCH RIÊNG KHỎI RunClient
@@ -31,7 +31,7 @@
 #include <vector>
 
 #include "net/UdpSocket.h"
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 struct ClientOptions {
     NetAddr server;           // địa chỉ agent
@@ -39,12 +39,12 @@ struct ClientOptions {
     bool    sendInput = true; // GD4: đẩy phím/chuột tới host
     // Nguồn muốn xem (từ QueryHostSources). Rỗng = xem nguồn 0 — giữ đường cũ chạy
     // được với host chỉ chia sẻ một thứ.
-    std::vector<rgc::SourceInfo> sources;
+    std::vector<deskhub::SourceInfo> sources;
 };
 
 // Hỏi host đang chia sẻ những gì. Trả false nếu host không trả lời trong ~3s
 // (sai IP, firewall chặn, hoặc host bản cũ không biết LIST_SOURCES).
-bool QueryHostSources(const NetAddr& server, std::vector<rgc::SourceInfo>& out);
+bool QueryHostSources(const NetAddr& server, std::vector<deskhub::SourceInfo>& out);
 
 // Kết nối tới agent, hiện video tới khi người dùng đóng hết cửa sổ preview /
 // Ctrl+C / mất kết nối. Trả về exit code cho main.

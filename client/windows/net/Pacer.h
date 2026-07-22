@@ -35,7 +35,7 @@
 //   phải đồng hồ.
 //
 // LIÊN QUAN: AgentLoop.cpp (thread gửi — người dùng duy nhất),
-//            rgc/transport/Packetizer.h (nguồn sinh ra chùm gói), docs/08 §6
+//            deskhub/transport/Packetizer.h (nguồn sinh ra chùm gói), docs/08 §6
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

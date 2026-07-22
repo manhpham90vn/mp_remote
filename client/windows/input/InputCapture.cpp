@@ -29,7 +29,7 @@
 
 #include <windowsx.h> // GET_X_LPARAM / GET_XBUTTON_WPARAM / GET_WHEEL_DELTA_WPARAM
 
-#include "rgcp/Clock.h"
+#include "deskhubp/Clock.h"
 
 #include <cstdio>
 #include <vector>
@@ -145,10 +145,10 @@ void InputCapture::SetRelativeMode(bool on) {
     }
 }
 
-void InputCapture::Emit(rgc::InputType type, int32_t a, int32_t b,
+void InputCapture::Emit(deskhub::InputType type, int32_t a, int32_t b,
                         uint8_t state, uint8_t absolute) {
     if (!enabled_ || !sink_) return;
-    rgc::InputEvent e;
+    deskhub::InputEvent e;
     e.type        = type;
     e.timestampUs = NowUs();
     e.a           = a;
@@ -161,14 +161,14 @@ void InputCapture::Emit(rgc::InputType type, int32_t a, int32_t b,
 // Đếm số nút đang giữ để biết lúc nào được nhả SetCapture. Không đếm mà nhả ngay
 // khi có một nút lên thì thao tác kéo-thả bằng hai nút sẽ đứt giữa chừng — và tệ
 // hơn, sự kiện nhả của nút còn lại rơi ra ngoài cửa sổ, gây kẹt nút ở máy host.
-void InputCapture::EmitButton(rgc::MouseButton btn, bool down) {
+void InputCapture::EmitButton(deskhub::MouseButton btn, bool down) {
     // Giữ chuột khi nhấn để vẫn nhận được nút-nhả ngoài vùng cửa sổ (kéo thả).
     if (down) {
         if (buttonsDown_++ == 0) SetCapture(hwnd_);
     } else if (buttonsDown_ > 0) {
         if (--buttonsDown_ == 0 && !relative_ && GetCapture() == hwnd_) ReleaseCapture();
     }
-    Emit(rgc::InputType::MouseButton, int32_t(btn), 0, down ? 1 : 0, 0);
+    Emit(deskhub::InputType::MouseButton, int32_t(btn), 0, down ? 1 : 0, 0);
 }
 
 void InputCapture::OnRawInput(LPARAM lp) {
@@ -200,8 +200,8 @@ void InputCapture::OnRawInput(LPARAM lp) {
         }
 
         int32_t scan = kb.MakeCode;
-        if (kb.Flags & RI_KEY_E0) scan |= rgc::kScanExtended;
-        Emit(rgc::InputType::Key, int32_t(kb.VKey), scan, down ? 1 : 0, 0);
+        if (kb.Flags & RI_KEY_E0) scan |= deskhub::kScanExtended;
+        Emit(deskhub::InputType::Key, int32_t(kb.VKey), scan, down ? 1 : 0, 0);
         return;
     }
 
@@ -211,7 +211,7 @@ void InputCapture::OnRawInput(LPARAM lp) {
         // tuyệt đối (WM_MOUSEMOVE) vẫn hoạt động đúng cho các thiết bị đó.
         if (m.usFlags & MOUSE_MOVE_ABSOLUTE) return;
         if (m.lLastX || m.lLastY)
-            Emit(rgc::InputType::MouseMove, m.lLastX, m.lLastY, 0, 0);
+            Emit(deskhub::InputType::MouseMove, m.lLastX, m.lLastY, 0, 0);
     }
 }
 
@@ -227,29 +227,29 @@ bool InputCapture::OnMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         if (relative_) return true; // delta lấy từ Raw Input rồi
         RECT r{};
         GetClientRect(hwnd_, &r);
-        Emit(rgc::InputType::MouseMove,
+        Emit(deskhub::InputType::MouseMove,
              Normalize(GET_X_LPARAM(lp), uint32_t(r.right - r.left)),
              Normalize(GET_Y_LPARAM(lp), uint32_t(r.bottom - r.top)), 0, 1);
         return true;
     }
 
-    case WM_LBUTTONDOWN: EmitButton(rgc::MouseButton::Left, true);    return true;
-    case WM_LBUTTONUP:   EmitButton(rgc::MouseButton::Left, false);   return true;
-    case WM_RBUTTONDOWN: EmitButton(rgc::MouseButton::Right, true);   return true;
-    case WM_RBUTTONUP:   EmitButton(rgc::MouseButton::Right, false);  return true;
-    case WM_MBUTTONDOWN: EmitButton(rgc::MouseButton::Middle, true);  return true;
-    case WM_MBUTTONUP:   EmitButton(rgc::MouseButton::Middle, false); return true;
+    case WM_LBUTTONDOWN: EmitButton(deskhub::MouseButton::Left, true);    return true;
+    case WM_LBUTTONUP:   EmitButton(deskhub::MouseButton::Left, false);   return true;
+    case WM_RBUTTONDOWN: EmitButton(deskhub::MouseButton::Right, true);   return true;
+    case WM_RBUTTONUP:   EmitButton(deskhub::MouseButton::Right, false);  return true;
+    case WM_MBUTTONDOWN: EmitButton(deskhub::MouseButton::Middle, true);  return true;
+    case WM_MBUTTONUP:   EmitButton(deskhub::MouseButton::Middle, false); return true;
     case WM_XBUTTONDOWN:
-        EmitButton(GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? rgc::MouseButton::X1
-                                                      : rgc::MouseButton::X2, true);
+        EmitButton(GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? deskhub::MouseButton::X1
+                                                      : deskhub::MouseButton::X2, true);
         return true;
     case WM_XBUTTONUP:
-        EmitButton(GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? rgc::MouseButton::X1
-                                                      : rgc::MouseButton::X2, false);
+        EmitButton(GET_XBUTTON_WPARAM(wp) == XBUTTON1 ? deskhub::MouseButton::X1
+                                                      : deskhub::MouseButton::X2, false);
         return true;
 
     case WM_MOUSEWHEEL:
-        Emit(rgc::InputType::MouseWheel, 0, GET_WHEEL_DELTA_WPARAM(wp), 0, 0);
+        Emit(deskhub::InputType::MouseWheel, 0, GET_WHEEL_DELTA_WPARAM(wp), 0, 0);
         return true;
 
     // Phím đã lấy qua WM_INPUT; nuốt message thường để Renderer không đóng cửa sổ

@@ -1,5 +1,5 @@
 // =============================================================================
-// NativeClient.kt — mặt tiền Kotlin của libremotegame.so.
+// NativeClient.kt — mặt tiền Kotlin của libdeskhub.so.
 //
 // NHIỆM VỤ
 //   Chỗ DUY NHẤT trong phần Kotlin được phép gọi xuống C++. Mọi Activity đi qua
@@ -10,7 +10,7 @@
 //
 // RÀNG BUỘC SỐNG CÒN: TÊN PHẢI KHỚP TỪNG CHỮ
 //   Tên hàm native ở đây quyết định tên hàm C++ bên JniBridge.cpp
-//   (Java_com_rgc_remotegame_NativeClient_*). Liên kết diễn ra LÚC CHẠY theo chuỗi,
+//   (Java_com_deskhub_app_NativeClient_*). Liên kết diễn ra LÚC CHẠY theo chuỗi,
 //   nên đổi tên gói, tên object, hay tên hàm mà quên sửa bên C++ thì trình dịch
 //   KHÔNG báo gì — app chỉ chết bằng UnsatisfiedLinkError khi chạm tới hàm đó.
 //
@@ -26,15 +26,15 @@
 //
 // LIÊN QUAN: JniBridge.cpp (phía C++, phải khớp tên), MainActivity.kt, StreamActivity.kt
 // =============================================================================
-package com.rgc.remotegame
+package com.deskhub.app
 
 import android.view.Surface
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 /**
- * Mặt tiền Kotlin của libremotegame.so. Tên hàm native phải khớp đúng chữ với
- * JniBridge.cpp (Java_com_rgc_remotegame_NativeClient_*) — đổi tên gói hoặc tên
+ * Mặt tiền Kotlin của libdeskhub.so. Tên hàm native phải khớp đúng chữ với
+ * JniBridge.cpp (Java_com_deskhub_app_NativeClient_*) — đổi tên gói hoặc tên
  * lớp là phải sửa cả bên C++.
  */
 object NativeClient {
@@ -49,7 +49,7 @@ object NativeClient {
     // Nạp .so một lần, lần đầu có ai chạm tới object này. Phải chạy trước mọi lời
     // gọi external fun, và khối init của object bảo đảm đúng điều đó.
     init {
-        System.loadLibrary("remotegame")
+        System.loadLibrary("deskhub")
     }
 
     /**

@@ -42,8 +42,8 @@
 //   dõi, không phải phép đo chính xác.
 //
 // LIÊN QUAN: ClientLoop.h, AgentLoop.cpp (phía đối diện), decode/Renderer.h,
-//            input/InputCapture.h, rgc/session/ClientSession.h,
-//            rgc/transport/Reassembler.h, docs/06 §5 §7
+//            input/InputCapture.h, deskhub/session/ClientSession.h,
+//            deskhub/transport/Reassembler.h, docs/06 §5 §7
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -64,12 +64,12 @@
 #include "input/InputCapture.h"
 #include "decode/IVideoDecoder.h"
 #include "decode/Renderer.h"
-#include "rgcp/Clock.h"
+#include "deskhubp/Clock.h"
 #include "Diag.h"
 
-#include "rgc/control/LinkStats.h"
-#include "rgc/session/ClientSession.h"
-#include "rgc/transport/Reassembler.h"
+#include "deskhub/control/LinkStats.h"
+#include "deskhub/session/ClientSession.h"
+#include "deskhub/transport/Reassembler.h"
 
 namespace {
 
@@ -94,7 +94,7 @@ BOOL WINAPI CtrlHandler(DWORD type) {
 //   statsMutex     — chuỗi hiển thị: Recv ghi, Main đọc.
 // Đối chiếu với SourcePipeline bên AgentLoop.cpp — cùng khuôn tổ chức.
 struct ClientStream {
-    rgc::SourceInfo src;
+    deskhub::SourceInfo src;
     UdpSocket sock;
     Renderer  renderer;
 
@@ -106,7 +106,7 @@ struct ClientStream {
     // Input do luồng Main gom -> luồng Recv đánh seq và gửi. Khóa chỉ giữ vài chục
     // nano giây quanh push/swap, không nằm trên đường nóng của video.
     std::mutex inputMutex;
-    std::vector<rgc::InputEvent> inputQueue;
+    std::vector<deskhub::InputEvent> inputQueue;
 
     // Cửa sổ preview của nguồn này có đang là cửa sổ nhận input không: đặt ở luồng
     // Main, luồng Recv soi mỗi vòng và báo host (SET_FOCUS) để host kéo cửa sổ nguồn
@@ -135,7 +135,7 @@ struct ClientStream {
 // mỗi giây hàng nghìn gói. ClientSession chỉ được báo bằng NotifyVideoPacket để
 // nuôi timeout và thoát khỏi trạng thái Starting.
 void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* device) {
-    std::unique_ptr<rgc::Reassembler> reasm; // tạo sau khi biết fps đàm phán
+    std::unique_ptr<deskhub::Reassembler> reasm; // tạo sau khi biết fps đàm phán
     // Decoder tạo VÀ dùng trên thread Decode: MfDecoder init mất ~150ms, dựng nó
     // trên thread Recv là recvfrom ngừng nghe đúng lúc IDR mở màn đang dồn về
     // (đo được recv_stall busy_ms=148, 2026-07-21). Tham số đàm phán đi qua bộ
@@ -157,7 +157,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
     // Frame kèm thời điểm vào hàng — để đo t_queue (K1): nằm chờ lâu nghĩa là
     // thread Decode không theo kịp, khác hẳn với mạng chậm hay ghép chậm.
     struct QItem {
-        rgc::Reassembler::Frame frame;
+        deskhub::Reassembler::Frame frame;
         uint64_t enqUs = 0;
     };
     std::deque<QItem> decQueue;
@@ -218,7 +218,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
                 decoder = CreateDecoder(device, dc, onDecoded);
                 if (!decoder) { s.failed.store(true); return; } // vòng Recv thấy failed
             }
-            rgc::Reassembler::Frame& f = it.frame;
+            deskhub::Reassembler::Frame& f = it.frame;
 
             // K1: t_queue = nằm chờ trong hàng đợi, t_dec = decode + render. Hai số
             // này tách "client đuối" khỏi "mạng chậm" khi mổ xẻ trễ e2e.
@@ -240,9 +240,9 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
         }
     });
 
-    rgc::ClientCallbacks cb;
+    deskhub::ClientCallbacks cb;
     cb.send = [&](std::span<const uint8_t> d) { s.sock.SendTo(opt.server, d.data(), d.size()); };
-    cb.onReady = [&](const rgc::NegotiatedParams& np) {
+    cb.onReady = [&](const deskhub::NegotiatedParams& np) {
         ackDeltaUs.store(int64_t(NowUs()) - int64_t(np.timebaseUs), std::memory_order_relaxed);
         negotiated = true; // từ đây thống kê 1s mới có nghĩa -> mở cổng in log
         std::printf("[Client][%s] Negotiation done: H264 %ux%u @%ufps, %.1f Mbps\n",
@@ -250,7 +250,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
         s.negW.store(np.width);
         s.negH.store(np.height); // main thấy kích thước -> tạo cửa sổ preview
     };
-    cb.onReconfig = [&](const rgc::NegotiatedParams& np) {
+    cb.onReconfig = [&](const deskhub::NegotiatedParams& np) {
         std::printf("[Client][%s] Host reconfigured: %ux%u, %.1f Mbps\n",
                     s.src.name.c_str(), np.width, np.height, np.bitrateBps / 1e6);
         s.negW.store(np.width);
@@ -268,11 +268,11 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
         std::printf("[Client][%s] Disconnected: %s\n", s.src.name.c_str(), reason);
         s.quit.store(true);
     };
-    rgc::ClientSession session(cb);
+    deskhub::ClientSession session(cb);
 
-    rgc::Hello hello;
+    deskhub::Hello hello;
     hello.clientId   = uint32_t(NowUs()) ^ GetCurrentProcessId() ^ (uint32_t(s.src.sourceId) << 24);
-    hello.codecMask  = rgc::kCodecMaskH264;
+    hello.codecMask  = deskhub::kCodecMaskH264;
     hello.maxWidth   = uint16_t(GetSystemMetrics(SM_CXSCREEN));
     hello.maxHeight  = uint16_t(GetSystemMetrics(SM_CYSCREEN));
     hello.desiredFps = 60;
@@ -280,8 +280,8 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
     hello.sourceId   = s.src.sourceId;
     session.Start(hello, NowUs());
 
-    uint8_t buf[rgc::kMaxDatagram];
-    rgc::LinkStats linkStats(NowUs());
+    uint8_t buf[deskhub::kMaxDatagram];
+    deskhub::LinkStats linkStats(NowUs());
 
     while (!s.quit.load() && !g_ctrlC.load() && !s.failed.load()) {
         NetAddr from;
@@ -295,20 +295,20 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 
         if (n > 0) {
             const auto span = std::span<const uint8_t>(buf, size_t(n));
-            const auto h = rgc::ParseCommonHeader(span);
-            if (h && h->chan == rgc::Chan::Video) {
+            const auto h = deskhub::ParseCommonHeader(span);
+            if (h && h->chan == deskhub::Chan::Video) {
                 if (h->sessionId == session.sessionId() && session.sessionId() != 0) {
-                    const auto pl = rgc::PayloadOf(span);
+                    const auto pl = deskhub::PayloadOf(span);
                     if (!reasm) {
                         const uint32_t fps = session.params().fps ? session.params().fps : 60;
-                        reasm = std::make_unique<rgc::Reassembler>(1'000'000 / fps);
+                        reasm = std::make_unique<deskhub::Reassembler>(1'000'000 / fps);
                         // Tham số cho thread Decode dựng decoder (ghi TRƯỚC khi bất
                         // kỳ frame nào có thể vào hàng đợi).
                         decW.store(session.params().width, std::memory_order_relaxed);
                         decH.store(session.params().height, std::memory_order_relaxed);
                         decFps.store(fps, std::memory_order_relaxed);
                         // C1: bản khám nghiệm từng frame bị khai tử.
-                        reasm->onFrameDrop = [&s](const rgc::Reassembler::FrameDropInfo& d) {
+                        reasm->onFrameDrop = [&s](const deskhub::Reassembler::FrameDropInfo& d) {
                             static const char* const kReason[] =
                                 {"timeout", "overtaken", "evicted", "pre_idr"};
                             // Vị trí chùm thiếu: đuôi frame là dấu vân tay của
@@ -328,13 +328,13 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
                                         pos, d.idr ? 1 : 0, d.waitedMs, d.bytesGot);
                         };
                     }
-                    if (h->type == rgc::MsgType::FecPacket) {
-                        if (const auto v = rgc::ParseFecPacket(*h, pl)) {
+                    if (h->type == deskhub::MsgType::FecPacket) {
+                        if (const auto v = deskhub::ParseFecPacket(*h, pl)) {
                             session.NotifyVideoPacket(now);
                             reasm->PushFec(*v, now);
                             stBytes += v->parity.size();
                         }
-                    } else if (const auto v = rgc::ParseVideoPacket(*h, pl)) {
+                    } else if (const auto v = deskhub::ParseVideoPacket(*h, pl)) {
                         session.NotifyVideoPacket(now);
                         reasm->Push(*v, now);
                         stBytes += v->payload.size();
@@ -397,7 +397,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 
         // Vét input do luồng Main gom được -> ClientSession đánh seq, Tick gửi.
         {
-            std::vector<rgc::InputEvent> batch;
+            std::vector<deskhub::InputEvent> batch;
             {
                 std::lock_guard<std::mutex> lk(s.inputMutex);
                 batch.swap(s.inputQueue);
@@ -407,12 +407,12 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 
         session.SetFocused(s.hasFocus.load(std::memory_order_relaxed));
         session.Tick(now);
-        if (session.state() == rgc::ClientSession::State::Dead) break;
+        if (session.state() == deskhub::ClientSession::State::Dead) break;
 
         if (linkStats.Due(now)) {
-            const auto st = reasm ? reasm->stats() : rgc::Reassembler::Stats{};
+            const auto st = reasm ? reasm->stats() : deskhub::Reassembler::Stats{};
             const uint32_t rendered = stRendered.exchange(0, std::memory_order_relaxed);
-            const rgc::LinkWindow w = linkStats.Close(st, stBytes, rendered, now);
+            const deskhub::LinkWindow w = linkStats.Close(st, stBytes, rendered, now);
             const int64_t e2e = lastE2eUs.load();
 
             // Chỉ in thống kê + cập nhật overlay khi đã kết nối (đàm phán xong). Trước
@@ -442,7 +442,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 
             // Số liệu đó gửi ngược cho host để nó siết/nới bitrate. Giữ nguyên nhịp kể
             // cả trước khi in log — đây là logic giao thức, không phải log.
-            session.SendFeedback(rgc::MakeFeedback(w, session.lastRttUs()));
+            session.SendFeedback(deskhub::MakeFeedback(w, session.lastRttUs()));
 
             // Dòng chẩn đoán 1s (K1/K2/K4 + late/gap từ core) — đọc-và-reset mọi bộ
             // đếm cửa sổ. late= là con số phân xử "mất thật vs tới muộn" (docs/06 §7b).
@@ -502,14 +502,14 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 //
 // Trả false = host im lặng suốt 3 giây. Không phải lỗi tử vong: có thể là host bản
 // trước GĐ6 không biết LIST_SOURCES, và người gọi sẽ lùi về nguồn 0.
-bool QueryHostSources(const NetAddr& server, std::vector<rgc::SourceInfo>& out) {
+bool QueryHostSources(const NetAddr& server, std::vector<deskhub::SourceInfo>& out) {
     out.clear();
     UdpSocket sock;
     if (!sock.Open(0)) return false;
     sock.SetRecvTimeout(200);
 
-    uint8_t buf[rgc::kMaxDatagram];
-    const size_t qn = rgc::BuildListSources(buf);
+    uint8_t buf[deskhub::kMaxDatagram];
+    const size_t qn = deskhub::BuildListSources(buf);
     if (!qn) return false;
 
     // Phát lại mỗi 500ms trong ~3s: LIST_SOURCES đi trên UDP, gói đầu mất là chuyện
@@ -526,11 +526,11 @@ bool QueryHostSources(const NetAddr& server, std::vector<rgc::SourceInfo>& out) 
         const int n = sock.RecvFrom(buf, sizeof(buf), from);
         if (n <= 0) continue;
         const auto span = std::span<const uint8_t>(buf, size_t(n));
-        const auto h = rgc::ParseCommonHeader(span);
-        if (!h || h->type != rgc::MsgType::SourceList) continue;
+        const auto h = deskhub::ParseCommonHeader(span);
+        if (!h || h->type != deskhub::MsgType::SourceList) continue;
 
-        rgc::SourceInfo tmp[rgc::kMaxSources];
-        const size_t cnt = rgc::ParseSourceList(rgc::PayloadOf(span), tmp);
+        deskhub::SourceInfo tmp[deskhub::kMaxSources];
+        const size_t cnt = deskhub::ParseSourceList(deskhub::PayloadOf(span), tmp);
         for (size_t i = 0; i < cnt; ++i) out.push_back(std::move(tmp[i]));
         return true;
     }
@@ -557,14 +557,14 @@ int RunClient(const ClientOptions& opt) {
     std::wprintf(L"[Client] GPU: %ls [%ls]\n", gpu.description.c_str(), GpuVendorName(gpu.vendor));
 
     // Nguồn cần xem. Rỗng = host chỉ chia sẻ một thứ / bản cũ -> xem nguồn 0.
-    std::vector<rgc::SourceInfo> wanted = opt.sources;
+    std::vector<deskhub::SourceInfo> wanted = opt.sources;
     if (wanted.empty()) {
-        rgc::SourceInfo s;
+        deskhub::SourceInfo s;
         s.sourceId = 0;
         s.name = "source 0";
         wanted.push_back(std::move(s));
     }
-    if (wanted.size() > rgc::kMaxSources) wanted.resize(rgc::kMaxSources);
+    if (wanted.size() > deskhub::kMaxSources) wanted.resize(deskhub::kMaxSources);
 
     std::vector<std::unique_ptr<ClientStream>> streams;
     for (auto& w : wanted) {
@@ -609,7 +609,7 @@ int RunClient(const ClientOptions& opt) {
         if (inputOwner) inputOwner->hasFocus.store(false, std::memory_order_relaxed);
         inputOwner = nullptr;
         if (!s || !opt.sendInput) return;
-        if (!input.Attach(s->renderer.Hwnd(), [s](const rgc::InputEvent& e) {
+        if (!input.Attach(s->renderer.Hwnd(), [s](const deskhub::InputEvent& e) {
                 std::lock_guard<std::mutex> lk(s->inputMutex);
                 s->inputQueue.push_back(e);
             })) {

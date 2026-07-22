@@ -7,7 +7,7 @@
 //   Ba macro dưới đây là toàn bộ cơ chế log của phần C++ trong app.
 //
 // CÁCH XEM
-//   adb logcat -s RemoteGame
+//   adb logcat -s Deskhub
 //   Cờ -s lọc theo tag, bỏ hết log của hệ thống và app khác.
 //
 // VÌ SAO LÀ MACRO CHỨ KHÔNG PHẢI HÀM
@@ -28,7 +28,7 @@
 // =============================================================================
 #include <android/log.h>
 
-#define RGC_TAG "RemoteGame"
-#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, RGC_TAG, __VA_ARGS__)
-#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, RGC_TAG, __VA_ARGS__)
-#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, RGC_TAG, __VA_ARGS__)
+#define DESKHUB_TAG "Deskhub"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, DESKHUB_TAG, __VA_ARGS__)
+#define LOGW(...) __android_log_print(ANDROID_LOG_WARN, DESKHUB_TAG, __VA_ARGS__)
+#define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, DESKHUB_TAG, __VA_ARGS__)

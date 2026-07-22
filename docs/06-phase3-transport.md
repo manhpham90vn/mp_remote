@@ -29,7 +29,7 @@ log được trễ và % mất gói; mất gói (giả lập) tự phục hồi 
    trên wire trung lập nền tảng: big-endian, µs, H.264 **Annex-B**, tọa độ chuẩn hóa,
    không có type Windows nào (HWND, QPC tick, v.v.) lọt lên wire.
 2. **Tách lõi mạng thuần** vào **thư viện chung `core/`** (static lib riêng,
-   namespace `rgc`) — C++20 chuẩn, **cấm include Windows header** (`windows.h`, winsock,
+   namespace `deskhub`) — C++20 chuẩn, **cấm include Windows header** (`windows.h`, winsock,
    winrt, D3D…), chỉ dùng `<cstdint> <vector> <span> <optional> <functional> <string>`.
    Toàn repo build bằng **CMake + Ninja** (`CMakePresets.json`, preset `x64-debug`/
    `x64-release`); `core/CMakeLists.txt` build được cả standalone cho nền tảng
@@ -62,8 +62,8 @@ phía client. Để chuyển đổi được, client cần SPS/PPS đi kèm mỗ
 ## 2. Cấu trúc module & luật phụ thuộc
 
 ```
-core/                           ★ DÙNG CHUNG GIỮA CÁC OS — thuần C++20, namespace `rgc`
-├── include/rgc/                public header (include qua "rgc/<nhóm>/...")
+core/                           ★ DÙNG CHUNG GIỮA CÁC OS — thuần C++20, namespace `deskhub`
+├── include/deskhub/                public header (include qua "deskhub/<nhóm>/...")
 │   ├── wire/ByteOrder.h ✅     đọc/ghi u16/u32/u64 big-endian (shift byte)
 │   ├── wire/Wire.h ✅          hằng số Type/Chan/Flags, struct message,
 │   │                           Build*/Parse* cho mọi loại gói v1
@@ -75,13 +75,13 @@ core/                           ★ DÙNG CHUNG GIỮA CÁC OS — thuần C++20
 │   ├── input/InputReceiver.h ✅    khử trùng, đếm mất
 │   ├── control/BitrateController.h ✅  policy bitrate/FEC phía host (GĐ5)
 │   └── control/LinkStats.h ✅         gom thống kê 1s + dựng Feedback phía client
-├── src/                        gương theo nhóm của include/rgc/
+├── src/                        gương theo nhóm của include/deskhub/
 ├── tests/CoreTests.cpp ✅      test offline (không mạng/GPU) → target `core_tests`
 └── CMakeLists.txt              static lib `core`; build được standalone
                                 cho macOS/Ubuntu/iOS/Android
 
 platform/                       ★ lớp MỎNG bọc header hệ điều hành — core không được chạm
-└── include/rgcp/Clock.h ✅     NowUs() đơn điệu (QPC trên Windows, CLOCK_MONOTONIC nơi khác)
+└── include/deskhubp/Clock.h ✅     NowUs() đơn điệu (QPC trên Windows, CLOCK_MONOTONIC nơi khác)
 
 client/
 ├── windows/                    app Windows — MỘT exe `client.exe` (kiểu AnyDesk), link `core`
@@ -342,8 +342,8 @@ khám nghiệm từng frame bị bỏ (`evt=frame_drop pos=tail/...`) và cỡ t
 ## 8. Thứ tự triển khai
 
 1. ✅ Lập thư viện `core/` (CMake target `core`, app link vào; toàn repo build
-   CMake + Ninja, cấu trúc `core/` + `client/<os>/`) với `rgc/ByteOrder.h` +
-   `rgc/Wire.h` + `Wire.cpp` (+ `04-protocol.md` đã cập nhật header 8 byte).
+   CMake + Ninja, cấu trúc `core/` + `client/<os>/`) với `deskhub/ByteOrder.h` +
+   `deskhub/Wire.h` + `Wire.cpp` (+ `04-protocol.md` đã cập nhật header 8 byte).
 2. ✅ `Packetizer` + `Reassembler` (trong core) + target `core_tests` (M1 PASS 2026-07-20:
    in-order / trộn thứ tự / mất gói / trùng gói / join giữa chừng / timeout đầu hàng
    / mô phỏng handshake 2 session — bytes ra == vào, loss event đúng lúc).

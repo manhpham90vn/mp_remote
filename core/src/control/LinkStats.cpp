@@ -11,11 +11,11 @@
 //   Mọi trường "…InWindow" trong LinkWindow là HIỆU so với lần đóng trước, trừ
 //   lossRunMax — nó là kỷ lục tích luỹ từ đầu phiên nên chép thẳng, không lấy hiệu.
 //
-// LIÊN QUAN: rgc/control/LinkStats.h (thiết kế + lý do tách lớp)
+// LIÊN QUAN: deskhub/control/LinkStats.h (thiết kế + lý do tách lớp)
 // =============================================================================
-#include "rgc/control/LinkStats.h"
+#include "deskhub/control/LinkStats.h"
 
-namespace rgc {
+namespace deskhub {
 
 LinkWindow LinkStats::Close(const Reassembler::Stats& cur, uint64_t videoBytes,
                             uint32_t renderedFrames, uint64_t nowUs) {
@@ -74,4 +74,4 @@ Feedback MakeFeedback(const LinkWindow& w, uint32_t rttUs) {
     return fb;
 }
 
-} // namespace rgc
+} // namespace deskhub

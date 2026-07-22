@@ -149,12 +149,12 @@ bool UdpSocket::Open(uint16_t localPort) {
     local.sin_port = htons(localPort);
     if (bind(s, (sockaddr*)&local, sizeof(local)) == SOCKET_ERROR) {
         const int err = WSAGetLastError();
-        // WSAEADDRINUSE là ca người dùng gặp thật: một host RemoteGame cũ còn chạy
+        // WSAEADDRINUSE là ca người dùng gặp thật: một host Deskhub cũ còn chạy
         // nền (cửa sổ menu bị ẩn suốt phiên share) vẫn giữ cổng. Tách riêng để tầng
         // trên báo cách xử lý thay vì phơi số lỗi 10048.
         lastBindAddrInUse_ = (err == WSAEADDRINUSE);
         if (lastBindAddrInUse_)
-            std::printf("[UDP] Port %u is already in use — another RemoteGame host (or "
+            std::printf("[UDP] Port %u is already in use — another Deskhub host (or "
                         "another program) is still listening on it.\n", localPort);
         else
             std::printf("[UDP] bind(:%u) failed: %d\n", localPort, err);

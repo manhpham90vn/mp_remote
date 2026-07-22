@@ -28,11 +28,11 @@
 #include <vector>
 
 #include "capture/WindowFinder.h"
-#include "rgc/wire/Wire.h" // kMaxSources
+#include "deskhub/wire/Wire.h" // kMaxSources
 
 namespace {
 
-constexpr wchar_t kWndClass[] = L"RemoteGameWindowPicker";
+constexpr wchar_t kWndClass[] = L"DeskhubWindowPicker";
 
 constexpr int kIdList     = 100;
 constexpr int kIdRefresh  = 101;
@@ -138,11 +138,11 @@ void Confirm(PickerState& st) {
 
     // Mỗi nguồn là một pipeline capture+encode riêng - quá nhiều thì GPU không kham
     // nổi và kMaxSources cũng là trần của SOURCE_LIST trong một datagram.
-    if (st.result.size() > rgc::kMaxSources) {
+    if (st.result.size() > deskhub::kMaxSources) {
         wchar_t msg[160];
         swprintf(msg, 160, L"Please select at most %zu sources (you selected %zu).",
-                 rgc::kMaxSources, st.result.size());
-        MessageBoxW(st.hwnd, msg, L"RemoteGame", MB_OK | MB_ICONWARNING);
+                 deskhub::kMaxSources, st.result.size());
+        MessageBoxW(st.hwnd, msg, L"Deskhub", MB_OK | MB_ICONWARNING);
         st.result.clear();
         return;
     }

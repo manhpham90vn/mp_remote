@@ -9,7 +9,7 @@
 //   code qua lại chỉ là chép, không phải viết lại.
 //
 // VỊ TRÍ TRONG KIẾN TRÚC
-//   core/ (rgc) tuyệt đối không biết đến lớp này: nó chỉ nhận/giao byte qua callback
+//   core/ (deskhub) tuyệt đối không biết đến lớp này: nó chỉ nhận/giao byte qua callback
 //   `send` và hàm HandlePacket. Toàn bộ hiểu biết về socket của app nằm ở đây và ở
 //   người gọi trực tiếp nó.
 //

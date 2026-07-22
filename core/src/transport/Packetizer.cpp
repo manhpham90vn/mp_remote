@@ -19,13 +19,13 @@
 //   buf_ và parity_ là thành viên của lớp, dùng lại qua từng lần gọi; không có
 //   std::vector nào được tạo trên đường này.
 //
-// LIÊN QUAN: rgc/transport/Packetizer.h (thiết kế + lý do), Reassembler.cpp (đầu kia)
+// LIÊN QUAN: deskhub/transport/Packetizer.h (thiết kế + lý do), Reassembler.cpp (đầu kia)
 // =============================================================================
-#include "rgc/transport/Packetizer.h"
+#include "deskhub/transport/Packetizer.h"
 
 #include <cstring>
 
-namespace rgc {
+namespace deskhub {
 
 size_t Packetizer::SendFrame(std::span<const uint8_t> nal, uint32_t frameId,
                              uint64_t timestampUs, bool idr, const SendFn& send) {
@@ -93,4 +93,4 @@ size_t Packetizer::SendFrame(std::span<const uint8_t> nal, uint32_t frameId,
     return count;
 }
 
-} // namespace rgc
+} // namespace deskhub

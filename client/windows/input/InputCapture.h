@@ -3,7 +3,7 @@
 // InputCapture.h — bắt phím/chuột trên cửa sổ preview, phía CLIENT (GĐ4).
 //
 // NHIỆM VỤ
-//   Biến thao tác của người dùng trên cửa sổ preview thành rgc::InputEvent để gửi
+//   Biến thao tác của người dùng trên cửa sổ preview thành deskhub::InputEvent để gửi
 //   sang host. Đối tác ở đầu kia là InputInjector.
 //
 // VỊ TRÍ TRONG LUỒNG DỮ LIỆU
@@ -30,18 +30,18 @@
 //   là đóng băng cả giao diện.
 //
 // LIÊN QUAN: input/InputInjector.h (đầu kia), decode/Renderer.h (nguồn message),
-//            rgc/input/InputSender.h, docs/07-phase4-input.md
+//            deskhub/input/InputSender.h, docs/07-phase4-input.md
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <functional>
 
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 class InputCapture {
 public:
-    using Sink = std::function<void(const rgc::InputEvent&)>;
+    using Sink = std::function<void(const deskhub::InputEvent&)>;
 
     // Đăng ký Raw Input cho cửa sổ preview. Gọi trên luồng sẽ bơm message.
     bool Attach(HWND hwnd, Sink sink);
@@ -62,9 +62,9 @@ public:
 
 private:
     void SetRelativeMode(bool on);
-    void Emit(rgc::InputType type, int32_t a, int32_t b, uint8_t state, uint8_t absolute);
+    void Emit(deskhub::InputType type, int32_t a, int32_t b, uint8_t state, uint8_t absolute);
     void OnRawInput(LPARAM lp);
-    void EmitButton(rgc::MouseButton btn, bool down);
+    void EmitButton(deskhub::MouseButton btn, bool down);
 
     HWND hwnd_ = nullptr;
     Sink sink_;

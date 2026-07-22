@@ -1,5 +1,5 @@
 // =============================================================================
-// JniBridge.cpp — mặt tiền JNI của libremotegame.so, thay cho NativeActivity cũ.
+// JniBridge.cpp — mặt tiền JNI của libdeskhub.so, thay cho NativeActivity cũ.
 //
 // NHIỆM VỤ
 //   Ranh giới giữa Kotlin và C++. Cố ý MỎNG: Kotlin lo phần người dùng nhìn thấy
@@ -76,12 +76,12 @@ extern "C" {
 // rằng nó không chia sẻ gì; Kotlin gộp cả hai thành "cứ thử nguồn 0".
 // CHẶN tới ~3s: gọi trên thread nền.
 JNIEXPORT jobjectArray JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeListSources(JNIEnv* env, jobject, jstring addrStr) {
+Java_com_deskhub_app_NativeClient_nativeListSources(JNIEnv* env, jobject, jstring addrStr) {
     jclass stringClass = env->FindClass("java/lang/String");
 
     const std::string addr = FromJString(env, addrStr);
     NetAddr server;
-    std::vector<rgc::SourceInfo> sources;
+    std::vector<deskhub::SourceInfo> sources;
     if (ParseNetAddr(addr, kDefaultPort, server)) {
         QuerySources(server, sources);
     } else {
@@ -90,7 +90,7 @@ Java_com_rgc_remotegame_NativeClient_nativeListSources(JNIEnv* env, jobject, jst
 
     jobjectArray arr = env->NewObjectArray(jsize(sources.size()), stringClass, nullptr);
     for (size_t i = 0; i < sources.size(); ++i) {
-        const rgc::SourceInfo& s = sources[i];
+        const deskhub::SourceInfo& s = sources[i];
         char head[32];
         std::snprintf(head, sizeof(head), "%u\t%u\t%u\t", s.sourceId, s.width, s.height);
         env->SetObjectArrayElement(arr, jsize(i), ToJString(env, head + s.name));
@@ -99,7 +99,7 @@ Java_com_rgc_remotegame_NativeClient_nativeListSources(JNIEnv* env, jobject, jst
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeStart(JNIEnv* env, jobject, jstring addrStr,
+Java_com_deskhub_app_NativeClient_nativeStart(JNIEnv* env, jobject, jstring addrStr,
                                                  jint sourceId) {
     const std::string addr = FromJString(env, addrStr);
 
@@ -122,7 +122,7 @@ Java_com_rgc_remotegame_NativeClient_nativeStart(JNIEnv* env, jobject, jstring a
 // Stop() chờ cả hai thread thoát hẳn rồi reset mới hủy đối tượng — nên sau khi hàm
 // này trả về, không còn thread nào của phiên cũ chạm vào Surface nữa.
 JNIEXPORT void JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeStop(JNIEnv*, jobject) {
+Java_com_deskhub_app_NativeClient_nativeStop(JNIEnv*, jobject) {
     if (g_client) {
         g_client->Stop();
         g_client.reset();
@@ -139,7 +139,7 @@ Java_com_rgc_remotegame_NativeClient_nativeStop(JNIEnv*, jobject) {
 // surface = null khi Surface bị hủy. Phải gọi TRƯỚC khi Surface thật sự biến mất
 // (tức trong surfaceDestroyed), vì SetWindow chặn tới khi codec buông nó ra.
 JNIEXPORT void JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeSetSurface(JNIEnv* env, jobject, jobject surface) {
+Java_com_deskhub_app_NativeClient_nativeSetSurface(JNIEnv* env, jobject, jobject surface) {
     if (surface) {
         ANativeWindow* w = ANativeWindow_fromSurface(env, surface);
         // Đã giữ một cửa sổ KHÁC: buông nó theo đúng thứ tự an toàn trước khi thay.
@@ -163,27 +163,27 @@ Java_com_rgc_remotegame_NativeClient_nativeSetSurface(JNIEnv* env, jobject, jobj
 }
 
 JNIEXPORT jint JNICALL
-Java_com_rgc_remotegame_NativeClient_nativePhase(JNIEnv*, jobject) {
+Java_com_deskhub_app_NativeClient_nativePhase(JNIEnv*, jobject) {
     return g_client ? jint(g_client->phase()) : jint(ClientLoop::Phase::Idle);
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeStatusLine(JNIEnv* env, jobject) {
+Java_com_deskhub_app_NativeClient_nativeStatusLine(JNIEnv* env, jobject) {
     return ToJString(env, g_client ? g_client->StatusLine() : std::string());
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeEndReason(JNIEnv* env, jobject) {
+Java_com_deskhub_app_NativeClient_nativeEndReason(JNIEnv* env, jobject) {
     return ToJString(env, g_client ? g_client->EndReason() : std::string());
 }
 
 JNIEXPORT jint JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeVideoWidth(JNIEnv*, jobject) {
+Java_com_deskhub_app_NativeClient_nativeVideoWidth(JNIEnv*, jobject) {
     return g_client ? jint(g_client->videoWidth()) : 0;
 }
 
 JNIEXPORT jint JNICALL
-Java_com_rgc_remotegame_NativeClient_nativeVideoHeight(JNIEnv*, jobject) {
+Java_com_deskhub_app_NativeClient_nativeVideoHeight(JNIEnv*, jobject) {
     return g_client ? jint(g_client->videoHeight()) : 0;
 }
 

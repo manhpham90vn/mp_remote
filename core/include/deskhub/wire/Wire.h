@@ -31,9 +31,9 @@
 //   nào giữ trạng thái — an toàn khi gọi từ nhiều thread trên các bộ đệm khác nhau.
 //
 // LIÊN QUAN
-//   rgc/wire/ByteOrder.h — lớp dịch byte bên dưới
-//   rgc/transport/Packetizer.h, Reassembler.h — người dùng chính của kênh video
-//   rgc/session/HostSession.h, ClientSession.h — người dùng chính của kênh control
+//   deskhub/wire/ByteOrder.h — lớp dịch byte bên dưới
+//   deskhub/transport/Packetizer.h, Reassembler.h — người dùng chính của kênh video
+//   deskhub/session/HostSession.h, ClientSession.h — người dùng chính của kênh control
 //   docs/04-protocol.md — đặc tả gốc
 // =============================================================================
 #include <cstddef>
@@ -42,7 +42,7 @@
 #include <span>
 #include <string>
 
-namespace rgc {
+namespace deskhub {
 
 inline constexpr uint8_t kProtocolVersion  = 1;
 inline constexpr size_t  kMaxDatagram      = 1200; // an toàn MTU Internet
@@ -271,4 +271,4 @@ std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,
 size_t ParseInputEvents(std::span<const uint8_t> payload, uint32_t& firstSeq,
                         std::span<InputEvent> out);
 
-} // namespace rgc
+} // namespace deskhub

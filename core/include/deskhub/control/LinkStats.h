@@ -30,15 +30,15 @@
 //   khác ghi, client tự giữ atomic của mình rồi truyền số đã đọc vào Close(). Nhờ
 //   vậy LinkStats thuần logic, không dính mô hình luồng của bất kỳ nền tảng nào.
 //
-// LIÊN QUAN: rgc/transport/Reassembler.h (nguồn số liệu),
-//            rgc/control/BitrateController.h (bên nhận Feedback ở phía host)
+// LIÊN QUAN: deskhub/transport/Reassembler.h (nguồn số liệu),
+//            deskhub/control/BitrateController.h (bên nhận Feedback ở phía host)
 // =============================================================================
 #include <cstdint>
 
-#include "rgc/transport/Reassembler.h"
-#include "rgc/wire/Wire.h"
+#include "deskhub/transport/Reassembler.h"
+#include "deskhub/wire/Wire.h"
 
-namespace rgc {
+namespace deskhub {
 
 // Số liệu dẫn xuất của một cửa sổ vừa đóng. Mọi trường "…InWindow" là CHÊNH LỆCH
 // so với lần đóng trước, không phải tổng tích luỹ.
@@ -88,4 +88,4 @@ private:
 // tín hiệu "đường thông" mới dám nới bitrate lên lại, im lặng bị hiểu là mất kết nối.
 Feedback MakeFeedback(const LinkWindow& w, uint32_t rttUs);
 
-} // namespace rgc
+} // namespace deskhub

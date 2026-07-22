@@ -39,7 +39,7 @@
 //   chuỗi trạng thái, hàng đợi frame, trạng thái Surface — mới cần mutex.
 //
 // LIÊN QUAN: JniBridge.cpp (người gọi duy nhất), decode/MediaCodecDecoder.h,
-//            rgc/session/ClientSession.h, rgc/transport/Reassembler.h,
+//            deskhub/session/ClientSession.h, deskhub/transport/Reassembler.h,
 //            client/windows/ClientLoop.cpp (bản song song)
 // =============================================================================
 #include <android/native_window.h>
@@ -55,7 +55,7 @@
 #include "decode/MediaCodecDecoder.h"
 #include "net/UdpSocket.h"
 
-#include "rgc/transport/Reassembler.h"
+#include "deskhub/transport/Reassembler.h"
 
 class ClientLoop {
 public:
@@ -131,7 +131,7 @@ private:
     static constexpr size_t kMaxQueuedFrames = 3;
     std::mutex                          decMutex_;
     std::condition_variable             decCv_;
-    std::deque<rgc::Reassembler::Frame> decQueue_;
+    std::deque<deskhub::Reassembler::Frame> decQueue_;
 
     std::atomic<bool>     decodeFailed_{false};
     std::atomic<bool>     queueOverflow_{false};

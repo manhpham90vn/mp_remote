@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">RemoteGame</string>
+    <string name="app_name">Deskhub</string>
 
     <!-- Màn hình nhập địa chỉ -->
     <string name="host_address_label">Address of the machine sharing its screen</string>

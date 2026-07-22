@@ -19,16 +19,16 @@
 //   được nhiều cửa sổ preview cùng lúc nên cho tick nhiều — xem MainActivity.kt.
 //
 // LIÊN QUAN: ui/WindowPickerDialog.h (đối xứng phía host), ClientLoop.h,
-//            rgc/wire/Wire.h (SourceInfo, kMaxSources)
+//            deskhub/wire/Wire.h (SourceInfo, kMaxSources)
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <vector>
 
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 // Hiện hộp thoại MODAL. `sources` là danh sách host trả về; `outSelected` nhận
 // những nguồn người dùng tick. Trả false nếu hủy hoặc không chọn gì.
-bool ShowSourcePickerDialog(HWND owner, const std::vector<rgc::SourceInfo>& sources,
-                            std::vector<rgc::SourceInfo>& outSelected);
+bool ShowSourcePickerDialog(HWND owner, const std::vector<deskhub::SourceInfo>& sources,
+                            std::vector<deskhub::SourceInfo>& outSelected);

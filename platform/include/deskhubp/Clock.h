@@ -47,7 +47,7 @@
 //   lần mỗi vòng lặp mạng.
 //
 // LIÊN QUAN: platform/CMakeLists.txt, core/CMakeLists.txt (nguyên tắc core không
-//            đụng OS), rgc/session/*.h (nơi tiêu thụ nowUs)
+//            đụng OS), deskhub/session/*.h (nơi tiêu thụ nowUs)
 // =============================================================================
 #include <cstdint>
 

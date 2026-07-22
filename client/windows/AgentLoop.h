@@ -15,7 +15,7 @@
 //   Chia sẻ nhiều cửa sổ và/hoặc cả màn hình cùng lúc trên MỘT cổng UDP. Mỗi nguồn
 //   có sourceId riêng, và mỗi cặp (client, nguồn) là một PHIÊN ĐỘC LẬP với
 //   sessionId riêng — không nhét streamId vào header video. Lý do đầy đủ ở chú
-//   thích của rgc::SourceInfo trong core/include/rgc/wire/Wire.h.
+//   thích của deskhub::SourceInfo trong core/include/deskhub/wire/Wire.h.
 //
 // LIÊN QUAN: AgentLoop.cpp (kiến trúc luồng + định tuyến gói), ClientLoop.h (phía
 //            đối diện), capture/WindowCapture.h (CaptureTarget),

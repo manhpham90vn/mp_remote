@@ -1,9 +1,9 @@
 # core — phần dùng chung giữa các OS (Windows/macOS/Ubuntu/iOS/Android):
 # giao thức wire, packetize/reassemble, session. Thuần C++20, KHÔNG include
-# header hệ điều hành nào. Build được trong cây RemoteGame lẫn standalone
+# header hệ điều hành nào. Build được trong cây Deskhub lẫn standalone
 # (clang/gcc, Xcode toolchain, Android NDK toolchain).
 cmake_minimum_required(VERSION 3.20)
-project(RemoteGameCore LANGUAGES CXX)
+project(DeskhubCore LANGUAGES CXX)
 
 # Nhóm theo tầng, dưới lên trên:
 #   wire/      — khung byte trên dây (header chung, build/parse từng loại message)
@@ -35,16 +35,16 @@ endif()
 
 # Test của core — chạy offline, không mạng/GPU, nên build được bằng mọi toolchain
 # dựng được core. Mặc định tắt trên Android: exe host không chạy được trên thiết bị,
-# và Gradle chỉ cần libremotegame.so. Muốn chạy test bằng NDK thì bật tay:
-#   cmake ... -DRGC_CORE_TESTS=ON
+# và Gradle chỉ cần libdeskhub.so. Muốn chạy test bằng NDK thì bật tay:
+#   cmake ... -DDESKHUB_CORE_TESTS=ON
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    set(rgc_tests_default OFF)
+    set(deskhub_tests_default OFF)
 else()
-    set(rgc_tests_default ON)
+    set(deskhub_tests_default ON)
 endif()
-option(RGC_CORE_TESTS "Build core_tests" ${rgc_tests_default})
+option(DESKHUB_CORE_TESTS "Build core_tests" ${deskhub_tests_default})
 
-if(RGC_CORE_TESTS)
+if(DESKHUB_CORE_TESTS)
     add_executable(core_tests tests/CoreTests.cpp)
     target_link_libraries(core_tests PRIVATE core)
     if(MSVC)

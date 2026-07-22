@@ -23,13 +23,13 @@
 //   Không gọi đồng hồ hệ thống ở bất cứ đâu; `nowUs` do người gọi bơm vào. Đó là
 //   lý do CoreTests kiểm chứng được cả đường timeout mà không phải sleep thật.
 //
-// LIÊN QUAN: rgc/transport/Reassembler.h (thiết kế + chính sách), Packetizer.cpp
+// LIÊN QUAN: deskhub/transport/Reassembler.h (thiết kế + chính sách), Packetizer.cpp
 // =============================================================================
-#include "rgc/transport/Reassembler.h"
+#include "deskhub/transport/Reassembler.h"
 
 #include <iterator>
 
-namespace rgc {
+namespace deskhub {
 
 // Cổng vào chung của Push và PushFec: mọi gói đều phải qua đây để lấy chỗ ghép.
 // Trả nullptr nghĩa là "bỏ gói này" — quá muộn, hoặc không khớp frame đang ghép.
@@ -297,4 +297,4 @@ void Reassembler::NoteLatePacket(uint32_t id, uint64_t nowUs) {
     }
 }
 
-} // namespace rgc
+} // namespace deskhub

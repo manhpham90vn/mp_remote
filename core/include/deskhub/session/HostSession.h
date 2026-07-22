@@ -32,18 +32,18 @@
 //   frame — nên hai trường đó là std::atomic. Mọi trường còn lại chỉ thread Recv
 //   chạm tới, kể cả bộ đệm buf_.
 //
-// LIÊN QUAN: rgc/session/ClientSession.h (đầu kia), rgc/input/InputReceiver.h,
+// LIÊN QUAN: deskhub/session/ClientSession.h (đầu kia), deskhub/input/InputReceiver.h,
 //            client/windows/AgentLoop.cpp (người dùng), docs/04-protocol.md
 // =============================================================================
-#include "rgc/input/InputReceiver.h"
-#include "rgc/wire/Wire.h"
+#include "deskhub/input/InputReceiver.h"
+#include "deskhub/wire/Wire.h"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <span>
 
-namespace rgc {
+namespace deskhub {
 
 inline constexpr uint64_t kSessionTimeoutUs = 5'000'000; // 5s không gói → mất peer
 
@@ -109,4 +109,4 @@ private:
     uint8_t  buf_[kMaxDatagram] = {}; // chỉ dùng trên thread Recv
 };
 
-} // namespace rgc
+} // namespace deskhub

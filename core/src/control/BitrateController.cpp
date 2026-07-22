@@ -15,11 +15,11 @@
 //   "client gửi Feedback mỗi giây". Client gửi thưa hơn thì FEC sẽ tắt chậm hơn;
 //   sai lệch này chấp nhận được vì tắt chậm chỉ tốn băng thông, không gây vỡ hình.
 //
-// LIÊN QUAN: rgc/control/BitrateController.h (chiến lược + lý do các ngưỡng)
+// LIÊN QUAN: deskhub/control/BitrateController.h (chiến lược + lý do các ngưỡng)
 // =============================================================================
-#include "rgc/control/BitrateController.h"
+#include "deskhub/control/BitrateController.h"
 
-namespace rgc {
+namespace deskhub {
 
 BitrateDecision BitrateController::Update(const Feedback& fb, uint64_t nowUs) {
     BitrateDecision d;
@@ -63,4 +63,4 @@ BitrateDecision BitrateController::Update(const Feedback& fb, uint64_t nowUs) {
     return d;
 }
 
-} // namespace rgc
+} // namespace deskhub

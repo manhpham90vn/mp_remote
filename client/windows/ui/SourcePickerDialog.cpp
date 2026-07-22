@@ -15,7 +15,7 @@
 //   WindowPickerDialog.cpp, nơi tên đi theo chiều ngược lại.
 //
 // LIÊN QUAN: ui/SourcePickerDialog.h (vai trò), ui/WindowPickerDialog.cpp (cùng
-//            khuôn mẫu, chiều ngược lại), rgc/wire/Wire.h (SourceInfo)
+//            khuôn mẫu, chiều ngược lại), deskhub/wire/Wire.h (SourceInfo)
 // =============================================================================
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -25,7 +25,7 @@
 
 namespace {
 
-constexpr wchar_t kWndClass[] = L"RemoteGameSourcePicker";
+constexpr wchar_t kWndClass[] = L"DeskhubSourcePicker";
 
 constexpr int kIdList   = 300;
 constexpr int kIdOk     = 301;
@@ -44,8 +44,8 @@ std::wstring FromUtf8(const std::string& s) {
 struct State {
     HWND hwnd = nullptr;
     HWND list = nullptr;
-    const std::vector<rgc::SourceInfo>* sources = nullptr;
-    std::vector<rgc::SourceInfo> result;
+    const std::vector<deskhub::SourceInfo>* sources = nullptr;
+    std::vector<deskhub::SourceInfo> result;
     bool done = false;
 };
 
@@ -86,8 +86,8 @@ LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 } // namespace
 
-bool ShowSourcePickerDialog(HWND owner, const std::vector<rgc::SourceInfo>& sources,
-                            std::vector<rgc::SourceInfo>& outSelected) {
+bool ShowSourcePickerDialog(HWND owner, const std::vector<deskhub::SourceInfo>& sources,
+                            std::vector<deskhub::SourceInfo>& outSelected) {
     outSelected.clear();
     if (sources.empty()) return false;
     // Host chỉ chia sẻ một thứ: không bắt người dùng bấm thêm một hộp thoại nữa.

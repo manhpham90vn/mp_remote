@@ -26,11 +26,11 @@
 //   tra độ dài nằm ở Wire.cpp — mọi hàm Parse* đối chiếu kích thước payload
 //   trước khi gọi xuống đây.
 //
-// LIÊN QUAN: rgc/wire/Wire.h (người dùng duy nhất), docs/04-protocol.md
+// LIÊN QUAN: deskhub/wire/Wire.h (người dùng duy nhất), docs/04-protocol.md
 // =============================================================================
 #include <cstdint>
 
-namespace rgc {
+namespace deskhub {
 
 // Ghi 2 byte: byte nặng trước. Ép về uint8_t tự cắt lấy 8 bit thấp nên byte sau
 // không cần mặt nạ 0xFF.
@@ -73,4 +73,4 @@ inline uint64_t GetU64(const uint8_t* p) noexcept {
     return (uint64_t(GetU32(p)) << 32) | GetU32(p + 4);
 }
 
-} // namespace rgc
+} // namespace deskhub

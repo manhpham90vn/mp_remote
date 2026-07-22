@@ -4,12 +4,12 @@ plugins {
 }
 
 android {
-    namespace = "com.rgc.remotegame"
+    namespace = "com.deskhub.app"
     compileSdk = 37
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        applicationId = "com.rgc.remotegame"
+        applicationId = "com.deskhub.app"
         // 24: AMediaCodec NDK có từ 21, nhưng 24 mới đủ ổn định và phủ gần hết máy
         // còn dùng. Khóa "low-latency" chỉ có tác dụng từ 30, máy cũ lờ đi.
         minSdk = 24

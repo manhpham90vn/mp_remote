@@ -1,25 +1,25 @@
-# CMake do Gradle/NDK gọi — dựng libremotegame.so (toàn bộ app, không có Java).
+# CMake do Gradle/NDK gọi — dựng libdeskhub.so (toàn bộ app, không có Java).
 # Cây core/ được kéo vào nguyên vẹn: nó thuần C++20 không header hệ điều hành nên
 # biên dịch bằng toolchain NDK không cần sửa gì (xem core/CMakeLists.txt).
 cmake_minimum_required(VERSION 3.22.1)
-project(remotegame LANGUAGES C CXX)
+project(deskhub LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # <repo>/client/android/app/src/main/cpp -> lùi 6 mức về gốc repo.
-get_filename_component(RGC_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.." ABSOLUTE)
-add_subdirectory(${RGC_ROOT}/core ${CMAKE_CURRENT_BINARY_DIR}/core)
+get_filename_component(DESKHUB_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../.." ABSOLUTE)
+add_subdirectory(${DESKHUB_ROOT}/core ${CMAKE_CURRENT_BINARY_DIR}/core)
 # platform/ — lớp mỏng bọc header hệ điều hành (Clock.h); INTERFACE lib, không sinh
 # .a. Nhánh #else của Clock.h (clock_gettime) là nhánh Android dùng.
-add_subdirectory(${RGC_ROOT}/platform ${CMAKE_CURRENT_BINARY_DIR}/platform)
+add_subdirectory(${DESKHUB_ROOT}/platform ${CMAKE_CURRENT_BINARY_DIR}/platform)
 
 # Không còn native_app_glue: vòng đời app do Activity Kotlin lo, native chỉ là thư
 # viện được gọi qua JNI. Nhờ vậy cũng bỏ được cả trò -u ANativeActivity_onCreate.
 # Nhóm theo thư mục con giống client/windows: net/ (socket, truy vấn nguồn),
 # decode/ (MediaCodec). Ở gốc còn JniBridge (mặt tiếp xúc Kotlin) + ClientLoop.
-add_library(remotegame SHARED
+add_library(deskhub SHARED
     JniBridge.cpp
     ClientLoop.cpp
 
@@ -30,11 +30,11 @@ add_library(remotegame SHARED
 )
 
 # Include gốc cpp/ để mọi #include ghi đủ đường dẫn nhóm ("net/UdpSocket.h").
-target_include_directories(remotegame PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(deskhub PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
-target_link_libraries(remotegame
+target_link_libraries(deskhub
     PRIVATE
-        core        # rgc:: Wire/ClientSession/Reassembler/...
+        core        # deskhub:: Wire/ClientSession/Reassembler/...
         platform    # NowUs()
         android     # ANativeWindow, ANativeWindow_fromSurface
         mediandk    # AMediaCodec, AMediaFormat
@@ -46,6 +46,6 @@ target_link_libraries(remotegame
 #   dlopen failed: program alignment (4096) cannot be smaller than system page size (16384)
 # NDK r27+ mặc định làm việc này; ở r26 phải tự khai. Căn 16 KB vẫn chạy bình
 # thường trên máy 4 KB nên bật vô điều kiện.
-target_link_options(remotegame PRIVATE -Wl,-z,max-page-size=16384)
+target_link_options(deskhub PRIVATE -Wl,-z,max-page-size=16384)
 
-target_compile_options(remotegame PRIVATE -Wall -Wextra)
+target_compile_options(deskhub PRIVATE -Wall -Wextra)

@@ -30,15 +30,15 @@
 //   Chia sẻ nhiều cửa sổ thì bitrate của chúng độc lập nhau, và client có thể chỉ
 //   đang xem một trong số đó.
 //
-// LIÊN QUAN: rgc/control/LinkStats.h (bên sinh ra Feedback ở phía client),
-//            rgc/session/HostSession.h (nơi gọi Update)
+// LIÊN QUAN: deskhub/control/LinkStats.h (bên sinh ra Feedback ở phía client),
+//            deskhub/session/HostSession.h (nơi gọi Update)
 // =============================================================================
 //
 #include <cstdint>
 
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
-namespace rgc {
+namespace deskhub {
 
 struct BitrateDecision {
     uint32_t bitrateBps   = 0;     // mức ĐỀ NGHỊ (đã kẹp trong [min,max])
@@ -76,4 +76,4 @@ private:
     bool     fec_            = false;
 };
 
-} // namespace rgc
+} // namespace deskhub

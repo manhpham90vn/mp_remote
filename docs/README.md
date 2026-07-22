@@ -7,7 +7,7 @@ vai trò: `client.exe --serve` = host (máy chạy game), `client.exe --connect 
 
 ```
 core/            phần dùng chung giữa các OS (protocol, thuần C++20, KHÔNG header OS)
-  include/rgc/ + src/, chia theo tầng:
+  include/deskhub/ + src/, chia theo tầng:
     wire/        khung byte trên dây (header chung, build/parse từng message)
     transport/   cắt/ghép frame ↔ datagram, FEC, chống trùng & mất gói
     session/     handshake + vòng đời phiên hai phía (host/client)

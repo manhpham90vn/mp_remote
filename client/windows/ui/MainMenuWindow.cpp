@@ -54,7 +54,7 @@
 
 namespace {
 
-constexpr wchar_t kWndClass[] = L"RemoteGameMainMenu";
+constexpr wchar_t kWndClass[] = L"DeskhubMainMenu";
 
 constexpr int kIdEditPort    = 200;
 constexpr int kIdEditFps     = 199;
@@ -127,13 +127,13 @@ void ReportDiagLog(HWND owner, const DiagLogRedirect& log, bool wanted) {
     if (!wanted) return;
     if (log.active()) {
         const std::wstring msg = L"Diagnostic log saved to:\n\n" + log.path();
-        MessageBoxW(owner, msg.c_str(), L"RemoteGame", MB_OK | MB_ICONINFORMATION);
+        MessageBoxW(owner, msg.c_str(), L"Deskhub", MB_OK | MB_ICONINFORMATION);
     } else {
         MessageBoxW(owner,
                     L"Could not create the diagnostic log file next to the program.\n\n"
                     L"The session ran normally, but nothing was recorded. Try moving "
                     L"the program to a folder you can write to (for example Desktop).",
-                    L"RemoteGame", MB_OK | MB_ICONWARNING);
+                    L"Deskhub", MB_OK | MB_ICONWARNING);
     }
 }
 
@@ -180,7 +180,7 @@ void DoShare(MenuState& st) {
             msg += L"- Mouse/keyboard control will not reach apps that run as "
                    L"administrator (games with anti-cheat, elevated tools). Everything "
                    L"else still works.";
-        MessageBoxW(st.hwnd, msg.c_str(), L"RemoteGame", MB_OK | MB_ICONWARNING);
+        MessageBoxW(st.hwnd, msg.c_str(), L"Deskhub", MB_OK | MB_ICONWARNING);
     }
 
     ShowWindow(st.hwnd, SW_HIDE);
@@ -200,7 +200,7 @@ void DoConnect(MenuState& st) {
     const std::wstring waddr = Trim(buf);
     if (waddr.empty()) {
         MessageBoxW(st.hwnd, L"Enter the host machine's IP address first (e.g., 192.168.1.10).",
-                    L"RemoteGame", MB_OK | MB_ICONWARNING);
+                    L"Deskhub", MB_OK | MB_ICONWARNING);
         return;
     }
     // Địa chỉ ip[:port] chỉ gồm ASCII - thu hẹp từng ký tự là an toàn.
@@ -214,7 +214,7 @@ void DoConnect(MenuState& st) {
     if (!ParseNetAddr(addr, kDefaultPort, co.server)) {
         const std::wstring msg = L"Invalid address: \"" + waddr +
             L"\"\n(e.g., 192.168.1.10 or 192.168.1.10:47777)";
-        MessageBoxW(st.hwnd, msg.c_str(), L"RemoteGame", MB_OK | MB_ICONERROR);
+        MessageBoxW(st.hwnd, msg.c_str(), L"Deskhub", MB_OK | MB_ICONERROR);
         return;
     }
     co.saveBmp = false;
@@ -223,7 +223,7 @@ void DoConnect(MenuState& st) {
     // Hỏi host đang chia sẻ những gì rồi cho chọn. Host bản cũ (hoặc sai IP /
     // firewall chặn) không trả lời -> cứ thử nguồn 0, ClientSession sẽ báo lỗi
     // kết nối cụ thể hơn nhiều so với một hộp thoại "không thấy host".
-    std::vector<rgc::SourceInfo> available;
+    std::vector<deskhub::SourceInfo> available;
     if (QueryHostSources(co.server, available) && !available.empty()) {
         if (!ShowSourcePickerDialog(st.hwnd, available, co.sources)) return;
     }
@@ -315,7 +315,7 @@ int RunMainMenuWindow() {
     const DWORD style = WS_OVERLAPPEDWINDOW & ~(WS_THICKFRAME | WS_MAXIMIZEBOX);
     RECT wr{ 0, 0, kW, kH };
     AdjustWindowRect(&wr, style, FALSE);
-    HWND hwnd = CreateWindowExW(0, kWndClass, L"RemoteGame - stream & remotely control an application",
+    HWND hwnd = CreateWindowExW(0, kWndClass, L"Deskhub - stream & remotely control an application",
                                  style, CW_USEDEFAULT, CW_USEDEFAULT,
                                  wr.right - wr.left, wr.bottom - wr.top,
                                  nullptr, nullptr, wc.hInstance, nullptr);

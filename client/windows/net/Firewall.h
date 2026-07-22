@@ -25,7 +25,7 @@
 //            socket), ui/MainMenuWindow.cpp (quyết định elevate), ElevatedShare.h
 // =============================================================================
 
-// True nếu rule inbound của RemoteGame đã tồn tại. Chỉ ĐỌC firewall nên chạy được ở
+// True nếu rule inbound của Deskhub đã tồn tại. Chỉ ĐỌC firewall nên chạy được ở
 // quyền thường — dùng để quyết định có cần bung UAC hay không trước khi share.
 bool HostFirewallRulePresent();
 

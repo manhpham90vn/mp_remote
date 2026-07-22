@@ -82,7 +82,7 @@ Chạy: `client.exe game.exe --loopback [--frames N] [--save]`
 (không `--frames`: chạy tới khi đóng cửa sổ preview / nhấn ESC).
 
 ## Giai đoạn 3 — Transport + Protocol v1 ✅ XONG trên 1 máy (thiết kế: `06-phase3-transport.md`)
-- ✅ **Thư viện chung `core/`** (static lib, namespace `rgc`) — thuần C++20, **không
+- ✅ **Thư viện chung `core/`** (static lib, namespace `deskhub`) — thuần C++20, **không
   Windows header**, dùng chung giữa các OS; không thread/socket/đồng hồ (thời gian
   bơm từ ngoài qua `nowUs` → test được offline). Cấu trúc repo: `core/` +
   `client/<os>/`; build **CMake + Ninja**. Đủ bộ: `ByteOrder` + `Wire` (header chung
@@ -114,7 +114,7 @@ Chạy: `client.exe game.exe --loopback [--frames N] [--save]`
 
 **File thêm ở GĐ3:** core: `transport/Packetizer`, `transport/Reassembler`,
 `session/HostSession`, `session/ClientSession` (+ `wire/ByteOrder.h`, `wire/Wire` từ trước),
-`tests/CoreTests.cpp`; platform: `rgcp/Clock.h`; client/windows: `net/UdpSocket`,
+`tests/CoreTests.cpp`; platform: `deskhubp/Clock.h`; client/windows: `net/UdpSocket`,
 `net/NetInfo`, `AgentLoop`, `ClientLoop`.
 Chạy: máy host `client.exe` → `[s]` (hoặc `client.exe game.exe --serve [--port N]`);
 máy xem `client.exe` → gõ `ip[:port]` (hoặc `client.exe --connect ip[:port]`).

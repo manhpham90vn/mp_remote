@@ -1,18 +1,18 @@
 // Test của core: packetize -> (trộn thứ tự / bỏ gói / trùng gói giả lập) ->
 // reassemble, FEC, cộng với mô phỏng handshake HostSession/ClientSession nối nhau
-// bằng "dây" trong bộ nhớ. Chỉ dùng core (rgc) + C++ chuẩn: chạy hoàn toàn offline
+// bằng "dây" trong bộ nhớ. Chỉ dùng core (deskhub) + C++ chuẩn: chạy hoàn toàn offline
 // (không mạng, không GPU) nên build/chạy được bằng MỌI toolchain dựng được core —
 // MSVC, clang/gcc, Android NDK. Exit code 0 = mọi kiểm tra đạt.
 //
 // Chạy:  cmake --build --preset x64-debug --target core_tests && ./core_tests
-#include "rgc/control/BitrateController.h"
-#include "rgc/control/LinkStats.h"
-#include "rgc/transport/Packetizer.h"
-#include "rgc/transport/Reassembler.h"
-#include "rgc/session/HostSession.h"
-#include "rgc/session/ClientSession.h"
-#include "rgc/input/InputSender.h"
-#include "rgc/input/InputReceiver.h"
+#include "deskhub/control/BitrateController.h"
+#include "deskhub/control/LinkStats.h"
+#include "deskhub/transport/Packetizer.h"
+#include "deskhub/transport/Reassembler.h"
+#include "deskhub/session/HostSession.h"
+#include "deskhub/session/ClientSession.h"
+#include "deskhub/input/InputSender.h"
+#include "deskhub/input/InputReceiver.h"
 
 #include <algorithm>
 #include <cstdio>
@@ -21,7 +21,7 @@
 #include <string>
 #include <vector>
 
-using namespace rgc;
+using namespace deskhub;
 
 namespace {
 

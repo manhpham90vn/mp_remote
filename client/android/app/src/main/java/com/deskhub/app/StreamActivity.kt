@@ -28,7 +28,7 @@
 //
 // LIÊN QUAN: MainActivity.kt (nơi mở màn hình này), NativeClient.kt, ClientLoop.h
 // =============================================================================
-package com.rgc.remotegame
+package com.deskhub.app
 
 import android.os.Bundle
 import android.view.SurfaceHolder

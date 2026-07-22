@@ -27,16 +27,16 @@
 //   "host bản cũ / chỉ có một nguồn" và cứ xem nguồn 0 — KHÔNG coi là lỗi tử vong,
 //   vì host đời trước GĐ6 hoàn toàn không biết thông điệp LIST_SOURCES.
 //
-// LIÊN QUAN: rgc/wire/Wire.h (BuildListSources/ParseSourceList), JniBridge.cpp
+// LIÊN QUAN: deskhub/wire/Wire.h (BuildListSources/ParseSourceList), JniBridge.cpp
 //            (người gọi), client/windows/ClientLoop.cpp (bản song song)
 // =============================================================================
 #include <vector>
 
 #include "net/UdpSocket.h"
 
-#include "rgc/wire/Wire.h"
+#include "deskhub/wire/Wire.h"
 
 // CHẶN tới ~3 giây. Trả false nếu không mở được socket hoặc host im lặng — caller
 // hiểu là "host bản cũ / chỉ có một nguồn" và cứ xem nguồn 0.
 // Phải gọi ngoài UI thread.
-bool QuerySources(const NetAddr& server, std::vector<rgc::SourceInfo>& out);
+bool QuerySources(const NetAddr& server, std::vector<deskhub::SourceInfo>& out);

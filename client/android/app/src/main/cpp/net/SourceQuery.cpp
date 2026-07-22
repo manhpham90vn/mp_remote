@@ -21,14 +21,14 @@
 #include "net/SourceQuery.h"
 
 #include "Log.h"
-#include "rgcp/Clock.h"
+#include "deskhubp/Clock.h"
 
 namespace {
 constexpr uint64_t kQueryTimeoutUs = 3'000'000; // người dùng đang đứng chờ
 constexpr uint64_t kResendUs       = 500'000;
 } // namespace
 
-bool QuerySources(const NetAddr& server, std::vector<rgc::SourceInfo>& out) {
+bool QuerySources(const NetAddr& server, std::vector<deskhub::SourceInfo>& out) {
     out.clear();
 
     // Socket riêng, cổng ngẫu nhiên, sống đúng trong hàm này — destructor tự đóng.
@@ -40,8 +40,8 @@ bool QuerySources(const NetAddr& server, std::vector<rgc::SourceInfo>& out) {
     }
     sock.SetRecvTimeout(200);
 
-    uint8_t buf[rgc::kMaxDatagram];
-    const size_t qn = rgc::BuildListSources(buf);
+    uint8_t buf[deskhub::kMaxDatagram];
+    const size_t qn = deskhub::BuildListSources(buf);
     if (!qn) return false;
 
     // Phát lại mỗi 500ms: LIST_SOURCES đi trên UDP, gói đầu mất là chuyện bình thường.
@@ -61,12 +61,12 @@ bool QuerySources(const NetAddr& server, std::vector<rgc::SourceInfo>& out) {
         // Lọc kỹ: cổng này vừa mở nên về lý thuyết chỉ có host trả lời, nhưng gói
         // lạc từ máy khác trong mạng LAN vẫn tới được. Chỉ nhận đúng SOURCE_LIST.
         const auto span = std::span<const uint8_t>(buf, size_t(n));
-        const auto h = rgc::ParseCommonHeader(span);
-        if (!h || h->type != rgc::MsgType::SourceList) continue;
+        const auto h = deskhub::ParseCommonHeader(span);
+        if (!h || h->type != deskhub::MsgType::SourceList) continue;
 
         // Đệm tạm cỡ cố định trên stack; ParseSourceList tự kẹp theo sức chứa này.
-        rgc::SourceInfo tmp[rgc::kMaxSources];
-        const size_t cnt = rgc::ParseSourceList(rgc::PayloadOf(span), tmp);
+        deskhub::SourceInfo tmp[deskhub::kMaxSources];
+        const size_t cnt = deskhub::ParseSourceList(deskhub::PayloadOf(span), tmp);
         for (size_t i = 0; i < cnt; ++i) out.push_back(std::move(tmp[i]));
         LOGI("[Sources] Host is sharing %zu source(s).", out.size());
         return true;
