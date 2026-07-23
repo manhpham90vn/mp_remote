@@ -24,7 +24,7 @@ render/input + transport). **Thêm một nền tảng = chỉ viết backend, kh
 | macOS | ✅ | ✅ | một app, cả hai vai | ⬜ chưa bắt đầu |
 | Ubuntu/Linux | ✅ | ✅ | một app, cả hai vai | ⬜ chưa bắt đầu |
 | Android | ❌ (không host được) | ✅ | app client-only | 🔶 stream video chạy (emulator ~33fps); chưa gửi input, số đo e2e còn sai |
-| iOS | ❌ | ✅ | app client-only | ⬜ chưa bắt đầu |
+| iOS | ❌ | ✅ | app client-only | 📐 thiết kế xong, chưa code (SwiftUI + VideoToolbox) |
 | Web | ❌ | ✅ | trong trình duyệt | 📐 thiết kế xong, chưa code |
 
 Vì sao chỉ desktop làm agent (inject input + listen socket): `11-platform-transport.md` §3.
@@ -91,6 +91,7 @@ cho `core.wasm` + bundler cho trang).
 | [09-diagnostics.md](09-diagnostics.md) | Log chẩn đoán điểm nghẽn (`[DIAG]`, luôn bật) |
 | [10-web-client.md](10-web-client.md) | Client Web (WebTransport + WebCodecs, core WASM) — thiết kế |
 | [11-platform-transport.md](11-platform-transport.md) | **Nền tảng & transport: ma trận agent/client, backend theo OS, chiến lược UDP/QUIC** (cross-cutting) |
+| [12-ios-client.md](12-ios-client.md) | Client iOS (SwiftUI + VideoToolbox, core C++) — thiết kế |
 
 ## Trạng thái
 
@@ -101,5 +102,5 @@ app thật trên 2 máy) · GĐ5 ổn định (RECONFIG/FEC/bitrate) ✅ · GĐ6
 Còn lại: giả lập mất gói (GĐ5 M4), đo trễ input game & kiểm chứng nhiều nguồn 2 máy (GĐ6).
 
 **Các nền tảng khác:** Android 🔶 (**stream video chạy trên emulator ~33fps**; chưa gửi
-input, số đo e2e còn sai — 08 §5/§6) · Web 📐 (thiết kế xong, chưa code — 10) ·
-macOS / Ubuntu / iOS ⬜ (chưa bắt đầu).
+input, số đo e2e còn sai — 08 §5/§6) · iOS 📐 (thiết kế xong, chưa code — 12) ·
+Web 📐 (thiết kế xong, chưa code — 10) · macOS / Ubuntu ⬜ (chưa bắt đầu).

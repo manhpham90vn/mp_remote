@@ -33,8 +33,9 @@ bản cài sẵn ở [Releases](https://github.com/manhpham90vn/Deskhub/releases
 |----------|:----:|:------:|-----------|
 | **Windows** | ✅ | ✅ | **Chạy thật 2 máy LAN + qua Tailscale** (Internet/NAT) — video + điều khiển |
 | **Android** | — | 🔶 | Stream video chạy (emulator ~33 fps); chưa gửi input |
+| **iOS** | — | 📐 | Thiết kế xong, chưa code (SwiftUI + VideoToolbox) |
 | **Web** | — | 📐 | Thiết kế xong, chưa code |
-| **macOS · Ubuntu · iOS** | ⬜ | ⬜ | Chưa bắt đầu |
+| **macOS · Ubuntu** | ⬜ | ⬜ | Chưa bắt đầu |
 
 Chi tiết giai đoạn + lộ trình từng nền tảng: [`docs/05-roadmap.md`](docs/05-roadmap.md).
 
