@@ -148,9 +148,11 @@ test-ctest:
 # Đo phủ code của lõi — Windows-only vì dùng OpenCppCoverage (bootstrap cài sẵn).
 # Dùng bản Debug (có PDB); chỉ tính core/src + core/include, bỏ code test khỏi mẫu số.
 ifeq ($(OS),Windows_NT)
+# MSI của OpenCppCoverage cài silent qua winget KHÔNG ghi PATH — tự thêm vào PATH
+# của recipe để chạy được ngay cả khi session/PATH chưa có.
 coverage:
 	@$(DEVCMD) cmake --preset x64-debug >$(NULDEV) && cmake --build --preset x64-debug --target core_tests
-	OpenCppCoverage --sources core\src --sources core\include --excluded_sources core\tests --export_type html:out\coverage -- out\build\x64-debug\core\core_tests.exe
+	set "PATH=%PATH%;C:\Program Files\OpenCppCoverage" && OpenCppCoverage --sources core\src --sources core\include --excluded_sources core\tests --export_type html:out\coverage -- out\build\x64-debug\core\core_tests.exe
 	@echo Report: out\coverage\index.html
 else
 coverage:

@@ -57,6 +57,21 @@ if (Install-IfMissing 'make' 'GnuWin32.Make' 'GNU make') { $restartNote = $true 
 if (Install-IfMissing 'java' 'EclipseAdoptium.Temurin.17.JDK' 'JDK 17 (Temurin)') { $restartNote = $true }
 if (Install-IfMissing 'OpenCppCoverage' 'OpenCppCoverage.OpenCppCoverage' 'OpenCppCoverage') { $restartNote = $true }
 
+# MSI của OpenCppCoverage khi cài silent qua winget KHÔNG ghi PATH — tự thêm vào
+# user PATH (persistent) nếu thiếu, để terminal mới gọi thẳng được OpenCppCoverage.
+$occDir = 'C:\Program Files\OpenCppCoverage'
+if ((Test-Path (Join-Path $occDir 'OpenCppCoverage.exe')) -and
+    -not (Get-Command OpenCppCoverage -ErrorAction SilentlyContinue)) {
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    if (($userPath -split ';') -notcontains $occDir) {
+        Write-Host "[path]    OpenCppCoverage -> user PATH ($occDir)"
+        [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $occDir), 'User')
+        $restartNote = $true
+    }
+    # Cho phần còn lại của script này thấy được tool ngay, khỏi đợi terminal mới.
+    $env:Path += ';' + $occDir
+}
+
 # --- ktlint + swiftformat (bản ghim, về tools\) -----------------------------
 # codestyle.ps1 chỉ DÙNG tool, không tải — mọi thứ cài đặt gom về đây.
 $toolsDir = Join-Path $root 'tools'
