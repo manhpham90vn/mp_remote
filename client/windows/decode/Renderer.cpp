@@ -30,6 +30,7 @@
 #include "decode/Renderer.h"
 #include "capture/BmpWriter.h"
 
+#include <d3d11_1.h>
 #include <dxgi1_2.h>
 #include <wrl/client.h>
 #include <atomic>
@@ -56,14 +57,23 @@ using Microsoft::WRL::ComPtr;
 
 namespace {
 constexpr wchar_t kWndClass[] = L"LoopbackPreviewWnd";
+constexpr wchar_t kVideoClass[] = L"LoopbackVideoHost";
+
+// Thủ tục của child window chứa video. HTTRANSPARENT để mọi cú chuột "xuyên" qua
+// nó rơi về cửa sổ cha — InputCapture móc vào WndProc của cha nên không được để
+// child này nuốt mất input.
+LRESULT CALLBACK VideoHostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+    if (msg == WM_NCHITTEST) return HTTRANSPARENT;
+    return DefWindowProcW(h, msg, wp, lp);
 }
+} // namespace
 
 struct Renderer::Impl {
     HWND hwnd = nullptr;
-    HWND statusLabel = nullptr;
+    HWND videoHwnd = nullptr; // child chứa swapchain — xem ghi chú ở Init
     HWND btnLock = nullptr;
     HWND btnPause = nullptr;
-    HBRUSH labelBrush = nullptr;   // nền dòng số liệu
+    std::wstring baseTitle;        // tiêu đề gốc — SetStatusText ghép số liệu vào sau
     Renderer::CommandHook cmdHook; // GD5: nút overlay -> bên ngoài
     ComPtr<ID3D11Device> device;
     ComPtr<ID3D11DeviceContext> context;
@@ -86,8 +96,7 @@ struct Renderer::Impl {
     Renderer::MessageHook msgHook; // chỉ đọc/ghi trên luồng message (main)
 
     ~Impl() {
-        if (hwnd) DestroyWindow(hwnd); // hủy cả child (label + 2 nút)
-        if (labelBrush) DeleteObject(labelBrush);
+        if (hwnd) DestroyWindow(hwnd); // hủy cả child (video host + 2 nút)
     }
 
     static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -102,15 +111,6 @@ struct Renderer::Impl {
             case WM_KEYDOWN:
                 if (wp == VK_ESCAPE && self) self->closed.store(true);
                 return 0;
-            case WM_CTLCOLORSTATIC:
-                // Nền dòng số liệu: chữ sáng trên nền tối để đọc được trên video.
-                if (self && (HWND)lp == self->statusLabel) {
-                    HDC hdc = (HDC)wp;
-                    SetTextColor(hdc, RGB(240, 240, 240));
-                    SetBkColor(hdc, RGB(20, 20, 20));
-                    return (LRESULT)self->labelBrush;
-                }
-                break;
             case WM_COMMAND:
                 // GD5: 2 nút overlay (kBtnLock/kBtnPause) -> báo ra ngoài, giống hệt
                 // đường phím tắt F9/F10. Renderer không tự đổi trạng thái nút - bên
@@ -125,19 +125,15 @@ struct Renderer::Impl {
         return DefWindowProcW(h, msg, wp, lp);
     }
 
-    // GD5: dòng số liệu góc trên-trái + 2 nút khóa chuột/tạm dừng góc trên-phải,
-    // đè lên trên video bằng child window thường - DWM tự ghép, không cần can
-    // thiệp vào swapchain. Gọi sau khi `hwnd` + clientW/clientH đã có.
+    // GD5: 2 nút khóa chuột/tạm dừng góc trên-phải, bằng child window thường. DWM
+    // chỉ ghép chúng LÊN TRÊN video vì swapchain nằm ở child videoHwnd dưới đáy
+    // z-order (xem Init) — gắn swapchain thẳng vào cha là chúng bị visual của
+    // swapchain che mất. Dòng số liệu KHÔNG là overlay: nó nằm trên thanh tiêu đề
+    // (SetStatusText) nên không che video. Gọi sau khi `hwnd` + clientW/H đã có.
     void CreateOverlay() {
-        labelBrush = CreateSolidBrush(RGB(20, 20, 20));
         const HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 
         const int btnW = 130, btnH = 24, pad = 8;
-        statusLabel = CreateWindowExW(0, L"STATIC", L"",
-            WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX,
-            pad, pad, (int)clientW > 2 * (btnW + pad) + 400 ? 400 : (int)clientW - 2 * (btnW + pad) - pad,
-            btnH, hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
-
         btnLock = CreateWindowExW(0, L"BUTTON", L"\U0001F512 Lock mouse (F9)",
             WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_PUSHLIKE,
             (int)clientW - pad - 2 * btnW - pad, pad, btnW, btnH,
@@ -148,7 +144,7 @@ struct Renderer::Impl {
             (int)clientW - pad - btnW, pad, btnW, btnH,
             hwnd, (HMENU)(INT_PTR)Renderer::kBtnPause, GetModuleHandleW(nullptr), nullptr);
 
-        for (HWND c : {statusLabel, btnLock, btnPause})
+        for (HWND c : {btnLock, btnPause})
             if (c) SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
     }
 
@@ -206,7 +202,28 @@ struct Renderer::Impl {
             std::printf("[Renderer] CreateWindow failed.\n");
             return false;
         }
+        baseTitle = title ? title : L"";
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)this);
+
+        // Swapchain flip-model KHÔNG được gắn thẳng vào cửa sổ cha: DWM ghép visual
+        // của swapchain ĐÈ LÊN redirection surface chứa các GDI child (dòng số liệu,
+        // hai nút) — chúng vẫn "visible" mà không bao giờ hiện ra. Tách video vào
+        // một child riêng, đẩy xuống đáy z-order; label/nút là sibling nằm trên nên
+        // DWM ghép đúng thứ tự.
+        WNDCLASSW vc{};
+        vc.lpfnWndProc = VideoHostProc;
+        vc.hInstance = wc.hInstance;
+        vc.lpszClassName = kVideoClass;
+        RegisterClassW(&vc); // lần hai trở đi trả ALREADY_EXISTS — không sao
+        videoHwnd = CreateWindowExW(0, kVideoClass, L"", WS_CHILD | WS_VISIBLE,
+            0, 0, (int)clientW, (int)clientH, hwnd, nullptr, wc.hInstance, nullptr);
+        if (!videoHwnd) {
+            std::printf("[Renderer] CreateWindow (video host) failed.\n");
+            return false;
+        }
+        SetWindowPos(videoHwnd, HWND_BOTTOM, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+
         ShowWindow(hwnd, SW_SHOW);
         CreateOverlay();
 
@@ -227,8 +244,8 @@ struct Renderer::Impl {
         sd.BufferCount = 2; // tối thiểu của flip-model; nhiều hơn chỉ thêm độ trễ
         sd.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
         sd.Scaling = DXGI_SCALING_STRETCH;
-        RND_CHECK(factory->CreateSwapChainForHwnd(device.Get(), hwnd, &sd, nullptr, nullptr,
-                      &swapchain),
+        RND_CHECK(factory->CreateSwapChainForHwnd(device.Get(), videoHwnd, &sd, nullptr,
+                      nullptr, &swapchain),
             "CreateSwapChainForHwnd");
         RND_CHECK(swapchain->GetBuffer(0, IID_PPV_ARGS(&backbuffer)), "GetBuffer");
 
@@ -279,6 +296,32 @@ struct Renderer::Impl {
         videoContext->VideoProcessorSetStreamSourceRect(vp.Get(), 0, TRUE, &src);
         RECT dst{0, 0, (LONG)clientW, (LONG)clientH};
         videoContext->VideoProcessorSetStreamDestRect(vp.Get(), 0, TRUE, &dst);
+
+        // Khai TƯỜNG MINH color space cho phép chuyển NV12→BGRA: vào là YUV BT.709
+        // limited (đúng thứ MfEncoder phát), ra là RGB full range cho swapchain.
+        // Bỏ trống thì driver tự đoán và có thể đoán khác đầu encode — màu trôi
+        // cả khung (đen bị nâng, sáng bị cắt trần).
+        //
+        // Driver đời mới bỏ qua struct legacy, chỉ tôn trọng đường ColorSpace1
+        // (đo thực tế 24/07/2026, xem ghi chú tương ứng ở MfEncoder) — gọi cả hai.
+        ComPtr<ID3D11VideoContext1> vc1;
+        if (SUCCEEDED(videoContext.As(&vc1))) {
+            vc1->VideoProcessorSetStreamColorSpace1(vp.Get(), 0,
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
+            vc1->VideoProcessorSetOutputColorSpace1(vp.Get(),
+                DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+        }
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE inCs{};
+        inCs.YCbCr_Matrix = 1; // 1 = BT.709
+        inCs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+        videoContext->VideoProcessorSetStreamColorSpace(vp.Get(), 0, &inCs);
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE outCs{};
+        outCs.RGB_Range = 0; // 0 = full 0-255
+        videoContext->VideoProcessorSetOutputColorSpace(vp.Get(), &outCs);
+
+        // TẮT "video enhancement" tự động của driver — cùng lý do với MfEncoder
+        // (Intel ACE tăng sáng nội dung tối, ngoài tầm mọi khai báo color space).
+        videoContext->VideoProcessorSetStreamAutoProcessingMode(vp.Get(), 0, FALSE);
 
         vpSrcW = w;
         vpSrcH = h;
@@ -357,7 +400,15 @@ void Renderer::SetCommandHook(CommandHook hook) {
 }
 
 void Renderer::SetStatusText(const wchar_t* text) {
-    if (impl_ && impl_->statusLabel) SetWindowTextW(impl_->statusLabel, text);
+    if (!impl_ || !impl_->hwnd) return;
+    // Ghép số liệu vào THANH TIÊU ĐỀ thay vì vẽ đè lên video: không che hình,
+    // không đụng swapchain, và thấy được cả khi cửa sổ không focus.
+    if (!text || !*text) {
+        SetWindowTextW(impl_->hwnd, impl_->baseTitle.c_str());
+        return;
+    }
+    const std::wstring t = impl_->baseTitle + L"   —   " + text;
+    SetWindowTextW(impl_->hwnd, t.c_str());
 }
 
 void Renderer::SetToggleState(bool locked, bool paused) {

@@ -51,6 +51,7 @@
 #include <codecapi.h>
 #include <icodecapi.h>
 #include <d3d11.h>
+#include <d3d11_1.h>
 #include <wrl/client.h>
 #include <cstdio>
 #include <map>
@@ -237,6 +238,11 @@ struct MfEncoder::Impl {
         inType->SetGUID(MF_MT_MAJOR_TYPE, MFMediaType_Video);
         inType->SetGUID(MF_MT_SUBTYPE, MFVideoFormat_NV12);
         inType->SetUINT32(MF_MT_INTERLACE_MODE, MFVideoInterlace_Progressive);
+        // Khai đúng range/matrix của NV12 mà ConvertToNv12 phát (BT.709 limited) để
+        // encoder ghi VUI khớp — decoder khác (MediaCodec ở Android) đọc VUI này;
+        // khai sai/bỏ trống là màu lệch ở client không dùng đường D3D11.
+        inType->SetUINT32(MF_MT_VIDEO_NOMINAL_RANGE, MFNominalRange_16_235);
+        inType->SetUINT32(MF_MT_YUV_MATRIX, MFVideoTransferMatrix_BT709);
         MF_CHECK(MFSetAttributeSize(inType.Get(), MF_MT_FRAME_SIZE, cfg.width, cfg.height),
             "FRAME_SIZE(in)");
         MF_CHECK(MFSetAttributeRatio(inType.Get(), MF_MT_FRAME_RATE, cfg.fps, 1),
@@ -472,6 +478,37 @@ struct MfEncoder::Impl {
         RECT rect{0, 0, (LONG)cfg.width, (LONG)cfg.height};
         videoContext->VideoProcessorSetStreamSourceRect(vp.Get(), 0, TRUE, &rect);
         videoContext->VideoProcessorSetStreamDestRect(vp.Get(), 0, TRUE, &rect);
+
+        // Khai TƯỜNG MINH color space cho phép chuyển BGRA→NV12: vào là RGB full
+        // range (0-255, ảnh chụp màn hình), ra là YUV BT.709 limited (16-235) —
+        // quy ước video chuẩn mà decoder mặc định hiểu. Bỏ trống thì driver tự
+        // đoán, và hai đầu đoán khác nhau là màu trôi cả khung (đen bị nâng,
+        // sáng bị cắt) — Renderer phía client khai đúng bộ ngược lại.
+        //
+        // Driver đời mới (Intel WDDM 2.x+) BỎ QUA struct legacy bên dưới và chỉ
+        // tôn trọng đường ColorSpace1 (DXGI_COLOR_SPACE_TYPE) — đo thực tế
+        // 24/07/2026: chỉ set struct legacy thì màu không đổi gì. Gọi cả hai:
+        // *1 cho driver mới, struct cho driver cũ chưa có ID3D11VideoContext1.
+        ComPtr<ID3D11VideoContext1> vc1;
+        if (SUCCEEDED(videoContext.As(&vc1))) {
+            vc1->VideoProcessorSetStreamColorSpace1(vp.Get(), 0,
+                DXGI_COLOR_SPACE_RGB_FULL_G22_NONE_P709);
+            vc1->VideoProcessorSetOutputColorSpace1(vp.Get(),
+                DXGI_COLOR_SPACE_YCBCR_STUDIO_G22_LEFT_P709);
+        }
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE inCs{};
+        inCs.RGB_Range = 0; // 0 = full 0-255
+        videoContext->VideoProcessorSetStreamColorSpace(vp.Get(), 0, &inCs);
+        D3D11_VIDEO_PROCESSOR_COLOR_SPACE outCs{};
+        outCs.YCbCr_Matrix = 1; // 1 = BT.709
+        outCs.Nominal_Range = D3D11_VIDEO_PROCESSOR_NOMINAL_RANGE_16_235;
+        videoContext->VideoProcessorSetOutputColorSpace(vp.Get(), &outCs);
+
+        // TẮT "video enhancement" tự động của driver (Intel ACE tăng sáng thích
+        // ứng nội dung tối...): nó chen vào VideoProcessorBlt NGOÀI mọi khai báo
+        // color space, làm ảnh stream sáng/tương phản lệch hẳn bản gốc dù chuỗi
+        // range/matrix đã đúng. Phải tắt ở CẢ hai đầu (đo 24/07/2026).
+        videoContext->VideoProcessorSetStreamAutoProcessingMode(vp.Get(), 0, FALSE);
         return true;
     }
 

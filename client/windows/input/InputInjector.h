@@ -10,11 +10,12 @@
 //   InputCapture (client) → UDP ~~~> InputReceiver → **InputInjector** → SendInput
 //
 // ÁNH XẠ TOẠ ĐỘ
-//   Client gửi toạ độ CHUẨN HOÁ (0..65535) trong khung hình nó nhìn thấy, tức là
-//   vùng client của cửa sổ đang chia sẻ. Host quy đổi ngược về pixel trong client
-//   rect của cửa sổ đích, rồi đổi tiếp sang toạ độ màn hình ảo cho SendInput.
-//   Nhờ đi qua thang chuẩn hoá này mà client thu nhỏ cửa sổ preview bao nhiêu tuỳ
-//   ý vẫn trỏ đúng chỗ.
+//   Client gửi toạ độ CHUẨN HOÁ (0..65535) trong khung hình nó nhìn thấy — đúng
+//   vùng WGC capture: TOÀN BỘ khung cửa sổ kể cả thanh tiêu đề (extended frame
+//   bounds của DWM), không phải chỉ client rect. Host quy đổi ngược về pixel trong
+//   đúng vùng đó, rồi đổi tiếp sang toạ độ màn hình ảo cho SendInput. Nhờ đi qua
+//   thang chuẩn hoá này mà client thu nhỏ cửa sổ preview bao nhiêu tuỳ ý vẫn trỏ
+//   đúng chỗ — và bấm được cả nút trên thanh tiêu đề của cửa sổ được share.
 //
 // BƠM BẰNG SCANCODE, KHÔNG PHẢI MÃ PHÍM ẢO
 //   KEYEVENTF_SCANCODE. Game dùng DirectInput/Raw Input đọc thẳng scancode; gửi vk

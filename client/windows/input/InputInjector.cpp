@@ -10,8 +10,9 @@
 //   ReleaseAll()          — nhả sạch phím/nút đang giữ.
 //
 // HAI TẦNG QUY ĐỔI TOẠ ĐỘ — dễ nhầm nếu không tách bạch
-//   1. Client gửi 0..65535 tương đối với VÙNG CLIENT của cửa sổ nguồn.
-//      → quy về pixel trong client rect, rồi ra pixel màn hình.
+//   1. Client gửi 0..65535 tương đối với KHUNG HÌNH nó nhìn thấy = vùng WGC
+//      capture: cả khung cửa sổ kể cả thanh tiêu đề (DWM extended frame bounds).
+//      → quy về pixel màn hình trong đúng vùng đó.
 //   2. SendInput lại đòi 0..65535 tương đối với MÀN HÌNH ẢO (mọi màn hình ghép lại).
 //      → ScreenToVirtualDesk làm bước này.
 //   Hai thang cùng dải 0..65535 nhưng gốc và độ dài khác hẳn nhau; nhầm chúng cho
@@ -37,12 +38,15 @@
 #define _CRT_SECURE_NO_WARNINGS
 #include "input/InputInjector.h"
 
+#include <dwmapi.h>
+
 #include <cstdio>
 
 #include "input/LocalInputMonitor.h"
 #include "deskhubp/Clock.h"
 
 #pragma comment(lib, "user32.lib")
+#pragma comment(lib, "dwmapi.lib")
 
 namespace {
 
@@ -193,16 +197,24 @@ void InputInjector::SendMoveAbsolute(int32_t nx, int32_t ny) {
         pt.x = mi.rcMonitor.left + LONG(int64_t(nx) * (w - 1) / 65535);
         pt.y = mi.rcMonitor.top + LONG(int64_t(ny) * (h - 1) / 65535);
     } else {
+        // Nguồn là một cửa sổ: WGC capture CẢ khung cửa sổ (kể cả thanh tiêu đề) —
+        // vùng nhìn thấy theo DWM (extended frame bounds), KHÔNG phải client rect.
+        // Ánh xạ vào client rect sẽ lệch xuống đúng chiều cao thanh tiêu đề, và nút
+        // đóng/thu nhỏ của cửa sổ được share không bao giờ bấm được từ xa.
+        // GetWindowRect chỉ là fallback: nó cộng thêm viền resize vô hình nên kém
+        // chính xác hơn một chút.
         RECT rc{};
-        if (!GetClientRect(target_, &rc)) return;
+        if (FAILED(DwmGetWindowAttribute(target_, DWMWA_EXTENDED_FRAME_BOUNDS,
+                &rc, sizeof(rc))) &&
+            !GetWindowRect(target_, &rc))
+            return;
         const int w = rc.right - rc.left;
         const int h = rc.bottom - rc.top;
         if (w <= 1 || h <= 1) return;
 
-        // Chuẩn hóa (khung hình client nhìn thấy) -> pixel trong client rect đích.
-        pt.x = LONG(int64_t(nx) * (w - 1) / 65535);
-        pt.y = LONG(int64_t(ny) * (h - 1) / 65535);
-        if (!ClientToScreen(target_, &pt)) return;
+        // Chuẩn hóa (khung hình client nhìn thấy) -> pixel màn hình trong khung đó.
+        pt.x = rc.left + LONG(int64_t(nx) * (w - 1) / 65535);
+        pt.y = rc.top + LONG(int64_t(ny) * (h - 1) / 65535);
     }
 
     INPUT in{};

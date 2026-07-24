@@ -76,8 +76,9 @@ public:
     using CommandHook = std::function<void(int id)>;
     void SetCommandHook(CommandHook hook);
 
-    // Dòng chữ số liệu (fps/kbps/mất gói/RTT/e2e) hiện góc trên-trái cửa sổ.
-    // Chỉ gọi từ luồng đã Init/Pump.
+    // Dòng số liệu (fps/kbps/mất gói/RTT/e2e) — ghép vào THANH TIÊU ĐỀ cửa sổ,
+    // sau tiêu đề gốc. Không che video, không đụng swapchain. Chuỗi rỗng = trả
+    // về tiêu đề gốc. Chỉ gọi từ luồng đã Init/Pump.
     void SetStatusText(const wchar_t* text);
 
     // Đồng bộ trạng thái 2 nút với InputCapture khi người dùng đổi bằng phím tắt

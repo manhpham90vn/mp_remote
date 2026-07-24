@@ -172,6 +172,36 @@ struct MfDecoder::Impl {
             if (sub == MFVideoFormat_NV12) {
                 MFD_CHECK(mft->SetOutputType(0, t.Get(), 0), "SetOutputType");
                 MFGetAttributeSize(t.Get(), MF_MT_FRAME_SIZE, &outWidth, &outHeight);
+                // MF_MT_FRAME_SIZE có thể là kích thước CODED (bội 16 của H.264,
+                // vd. 1124x634 -> 1136x640), không phải kích thước hiển thị. Lấy
+                // theo aperture nếu MFT khai — thiếu bước cắt này thì phần đệm
+                // (chroma 0 = xanh lá) hiện thành dải ở mép phải/dưới cửa sổ.
+                MFVideoArea area{};
+                if ((SUCCEEDED(t->GetBlob(MF_MT_MINIMUM_DISPLAY_APERTURE,
+                         (UINT8*)&area, sizeof(area), nullptr)) ||
+                        SUCCEEDED(t->GetBlob(MF_MT_GEOMETRIC_APERTURE,
+                            (UINT8*)&area, sizeof(area), nullptr))) &&
+                    area.Area.cx > 0 && area.Area.cy > 0 &&
+                    uint32_t(area.Area.cx) <= outWidth &&
+                    uint32_t(area.Area.cy) <= outHeight) {
+                    outWidth = uint32_t(area.Area.cx);
+                    outHeight = uint32_t(area.Area.cy);
+                } else if (cfg.width && cfg.height &&
+                           cfg.width <= outWidth && outWidth - cfg.width < 16 &&
+                           cfg.height <= outHeight && outHeight - cfg.height < 16) {
+                    // MFT không khai aperture: lùi về kích thước phiên đã đàm phán,
+                    // nhưng CHỈ khi chênh lệch đúng cỡ phần đệm alignment — RECONFIG
+                    // đổi hẳn độ phân giải thì không được lấy số cũ đè lên.
+                    outWidth = cfg.width;
+                    outHeight = cfg.height;
+                }
+                // Chẩn đoán màu: range/matrix mà decoder ĐỌC ĐƯỢC từ bitstream (VUI).
+                // 2 = MFNominalRange_16_235, 1 = 0_255; matrix 3 = BT709, 2 = BT601.
+                const uint32_t range = MFGetAttributeUINT32(t.Get(),
+                    MF_MT_VIDEO_NOMINAL_RANGE, 0);
+                const uint32_t matrix = MFGetAttributeUINT32(t.Get(), MF_MT_YUV_MATRIX, 0);
+                std::printf("[MfDecoder] Output %ux%u, nominalRange=%u, yuvMatrix=%u\n",
+                    outWidth, outHeight, range, matrix);
                 return true;
             }
         }
