@@ -58,6 +58,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -194,10 +195,14 @@ private fun StreamScreen(
         }
 
     // Hết phiên thì chạm vào đâu cũng quay lại màn hình nhập địa chỉ.
+    // imePadding: bàn phím ảo đẩy lên thì cả cột co lại phía trên nó — video thu nhỏ
+    // chứ không bị che, thanh nút dưới đáy nổi lên trên bàn phím (nút Keys vẫn với
+    // tới để đóng). Cần adjustResize trong manifest để inset IME được phát xuống.
     val rootModifier =
         Modifier
             .fillMaxSize()
             .background(Color.Black)
+            .imePadding()
             .let { if (phase == NativeClient.PHASE_ENDED) it.clickable(onClick = onDismiss) else it }
 
     val streaming = phase == NativeClient.PHASE_STREAMING

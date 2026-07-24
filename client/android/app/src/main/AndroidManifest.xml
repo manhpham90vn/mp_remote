@@ -25,6 +25,7 @@
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density|uiMode"
             android:exported="false"
             android:screenOrientation="fullUser"
-            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
+            android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+            android:windowSoftInputMode="adjustResize" />
     </application>
 </manifest>
