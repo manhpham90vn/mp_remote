@@ -1,0 +1,11 @@
+# Cấu hình SwiftLint cho client/ios — CI chạy `swiftlint --strict` (lint.yml).
+# Theo rule mặc định, chỉ chỉnh chỗ đá nhau với SwiftFormat hoặc thuật ngữ dự án:
+#   - trailing_comma: SwiftFormat (rule trailingCommas mặc định) chủ động THÊM dấu
+#     phẩy cuối trong collection nhiều dòng — tắt phía SwiftLint để hai tool không
+#     bắt lỗi ngược chiều nhau.
+#   - identifier_name: cho phép tên 2 ký tự — vk/nx/ny là thuật ngữ wire/input dùng
+#     xuyên suốt core C++ (KeyMap.h, Wire.h), đổi tên phía Swift chỉ gây lệch từ vựng.
+disabled_rules:
+  - trailing_comma
+identifier_name:
+  min_length: 2

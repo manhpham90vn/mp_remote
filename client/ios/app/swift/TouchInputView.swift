@@ -120,11 +120,11 @@ final class TouchCaptureUIView: UIView {
         cursorView.frame.origin = cursor
     }
 
-    private func clamped(_ p: CGPoint) -> CGPoint {
+    private func clamped(_ point: CGPoint) -> CGPoint {
         let rect = videoRect
         return CGPoint(
-            x: min(max(rect.minX, p.x), rect.maxX),
-            y: min(max(rect.minY, p.y), rect.maxY)
+            x: min(max(rect.minX, point.x), rect.maxX),
+            y: min(max(rect.minY, point.y), rect.maxY)
         )
     }
 

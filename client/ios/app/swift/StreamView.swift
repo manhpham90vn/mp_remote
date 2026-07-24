@@ -195,6 +195,10 @@ struct StreamView: View {
 
         Button("Disconnect") { model.disconnect() }
             .font(.caption.bold())
+            // Nhãn dài nhất thanh đáy: ô grid dọc (min 72pt) không chứa nổi —
+            // co chữ lại thay vì để bẻ xuống dòng thứ hai.
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
             .buttonStyle(.bordered)
             .controlSize(.small)
             .tint(.red)

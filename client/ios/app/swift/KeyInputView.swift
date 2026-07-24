@@ -9,6 +9,9 @@
 //   tầng C++ quy đổi sang VK (KeyMap.h, layout US) — ký tự ngoài ASCII bị bỏ qua
 //   ở đó, nên tắt luôn autocorrect/gợi ý cho đỡ nhiễu.
 //
+//   inputAccessoryView: thanh dính trên bàn phím với một nút Done để hạ bàn phím
+//   tại chỗ — bàn phím ảo iPhone không có phím tự đóng, khỏi với lên nút Keys.
+//
 // LIÊN QUAN: StreamView.swift (toggle bàn phím trên header), SessionModel.charTap
 // =============================================================================
 import SwiftUI
@@ -43,6 +46,39 @@ struct KeyInputView: UIViewRepresentable {
 final class KeyCaptureUIView: UIView, UIKeyInput {
     weak var model: SessionModel?
     var onKeyboardDismissed: (() -> Void)?
+
+    // UIView trả nil mặc định — override để iOS gắn thanh Done lên trên bàn phím.
+    override var inputAccessoryView: UIView? { accessoryBar }
+
+    private lazy var accessoryBar: UIView = {
+        // UIView thường, nền trong suốt — nút Done nổi một mình góc phải, không cần
+        // dải nền. KHÔNG dùng UIInputView: nó tự quyết chiều cao (mỗi đời iOS một
+        // kiểu) làm nút trôi khỏi vị trí. Thanh cao 48pt nhưng nút ghim mép TRÊN:
+        // bàn phím iOS 26 trên máy thật có viền kính trong suốt phía trên đè lên
+        // đáy accessory view — chừa 16pt đáy để nút không chìm xuống mép bàn phím
+        // (nền trong suốt nên khoảng chừa này vô hình trên máy không bị đè).
+        let bar = UIView(frame: CGRect(x: 0, y: 0, width: 0, height: 48))
+        var config = UIButton.Configuration.gray()
+        config.title = "Done"
+        config.buttonSize = .mini
+        let done = UIButton(
+            configuration: config,
+            primaryAction: UIAction { [weak self] _ in
+                guard let self else { return }
+                // Báo trước cho StreamView tắt trạng thái nút Keys: sau khi resign,
+                // keyboardWillHide đến lúc isFirstResponder đã false nên không tự báo.
+                onKeyboardDismissed?()
+                resignFirstResponder()
+            }
+        )
+        done.translatesAutoresizingMaskIntoConstraints = false
+        bar.addSubview(done)
+        NSLayoutConstraint.activate([
+            done.trailingAnchor.constraint(equalTo: bar.trailingAnchor, constant: -8),
+            done.topAnchor.constraint(equalTo: bar.topAnchor, constant: 4),
+        ])
+        return bar
+    }()
 
     // UITextInputTraits: bàn phím ASCII, không autocorrect — cái cần là PHÍM,
     // không phải văn bản đã qua bộ gõ.

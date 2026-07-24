@@ -11,22 +11,10 @@
 		BBBF000100000002006CCD14 /* CoreMedia.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBFR000100000002006CCD14 /* CoreMedia.framework */; };
 		BBBF000100000003006CCD14 /* AVFoundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBFR000100000003006CCD14 /* AVFoundation.framework */; };
 		BBBF000100000004006CCD14 /* CoreVideo.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = BBFR000100000004006CCD14 /* CoreVideo.framework */; };
-		BBSRC00100000001006CCD14 /* ClientSession.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BBCORE0100000001006CCD14 /* ClientSession.cpp */; };
-		BBSRC00100000002006CCD14 /* Reassembler.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BBCORE0100000002006CCD14 /* Reassembler.cpp */; };
-		BBSRC00100000003006CCD14 /* Wire.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BBCORE0100000003006CCD14 /* Wire.cpp */; };
-		BBSRC00100000004006CCD14 /* LinkStats.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BBCORE0100000004006CCD14 /* LinkStats.cpp */; };
-		BBSRC00100000005006CCD14 /* BitrateController.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BBCORE0100000005006CCD14 /* BitrateController.cpp */; };
-		BBSRC00100000006006CCD14 /* InputSender.cpp in Sources */ = {isa = PBXBuildFile; fileRef = BBCORE0100000006006CCD14 /* InputSender.cpp */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		BB1620BB3011D2F4006CCD14 /* app.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = app.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		BBCORE0100000001006CCD14 /* ClientSession.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = ClientSession.cpp; path = ../../core/src/session/ClientSession.cpp; sourceTree = "<group>"; };
-		BBCORE0100000002006CCD14 /* Reassembler.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = Reassembler.cpp; path = ../../core/src/transport/Reassembler.cpp; sourceTree = "<group>"; };
-		BBCORE0100000003006CCD14 /* Wire.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = Wire.cpp; path = ../../core/src/wire/Wire.cpp; sourceTree = "<group>"; };
-		BBCORE0100000004006CCD14 /* LinkStats.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = LinkStats.cpp; path = ../../core/src/control/LinkStats.cpp; sourceTree = "<group>"; };
-		BBCORE0100000005006CCD14 /* BitrateController.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = BitrateController.cpp; path = ../../core/src/control/BitrateController.cpp; sourceTree = "<group>"; };
-		BBCORE0100000006006CCD14 /* InputSender.cpp */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.cpp.cpp; name = InputSender.cpp; path = ../../core/src/input/InputSender.cpp; sourceTree = "<group>"; };
 		BBFR000100000001006CCD14 /* VideoToolbox.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = VideoToolbox.framework; path = System/Library/Frameworks/VideoToolbox.framework; sourceTree = SDKROOT; };
 		BBFR000100000002006CCD14 /* CoreMedia.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = CoreMedia.framework; path = System/Library/Frameworks/CoreMedia.framework; sourceTree = SDKROOT; };
 		BBFR000100000003006CCD14 /* AVFoundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = AVFoundation.framework; path = System/Library/Frameworks/AVFoundation.framework; sourceTree = SDKROOT; };
@@ -60,7 +48,6 @@
 			isa = PBXGroup;
 			children = (
 				BB1620BD3011D2F4006CCD14 /* app */,
-				BBGR000100000002006CCD14 /* core */,
 				BBGR000100000001006CCD14 /* Frameworks */,
 				BB1620BC3011D2F4006CCD14 /* Products */,
 			);
@@ -85,19 +72,6 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
-		BBGR000100000002006CCD14 /* core */ = {
-			isa = PBXGroup;
-			children = (
-				BBCORE0100000001006CCD14 /* ClientSession.cpp */,
-				BBCORE0100000002006CCD14 /* Reassembler.cpp */,
-				BBCORE0100000003006CCD14 /* Wire.cpp */,
-				BBCORE0100000004006CCD14 /* LinkStats.cpp */,
-				BBCORE0100000005006CCD14 /* BitrateController.cpp */,
-				BBCORE0100000006006CCD14 /* InputSender.cpp */,
-			);
-			name = core;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -105,6 +79,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = BB1620C63011D2F5006CCD14 /* Build configuration list for PBXNativeTarget "app" */;
 			buildPhases = (
+				BBSH000100000001006CCD14 /* Build libcore.a (CMake) */,
 				BB1620B73011D2F4006CCD14 /* Sources */,
 				BB1620B83011D2F4006CCD14 /* Frameworks */,
 				BB1620B93011D2F4006CCD14 /* Resources */,
@@ -172,16 +147,32 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				BBSRC00100000001006CCD14 /* ClientSession.cpp in Sources */,
-				BBSRC00100000002006CCD14 /* Reassembler.cpp in Sources */,
-				BBSRC00100000003006CCD14 /* Wire.cpp in Sources */,
-				BBSRC00100000004006CCD14 /* LinkStats.cpp in Sources */,
-				BBSRC00100000005006CCD14 /* BitrateController.cpp in Sources */,
-				BBSRC00100000006006CCD14 /* InputSender.cpp in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		BBSH000100000001006CCD14 /* Build libcore.a (CMake) */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build libcore.a (CMake)";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "# libcore.a build bằng CMake — core/CMakeLists.txt là nguồn sự thật duy nhất về\n# danh sách source của core, Xcode không giữ bản chép tay nữa (từng sót file khi\n# core thêm .cpp mới). Chạy lại mỗi build (alwaysOutOfDate): cmake tự incremental.\nset -euo pipefail\n# Xcode không kế thừa PATH của shell — thêm chỗ brew đặt cmake (bootstrap.sh cài).\nexport PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"\nBUILD_DIR=\"$SRCROOT/../../out/build/ios-core/$PLATFORM_NAME-$CONFIGURATION\"\ncmake -S \"$SRCROOT/../../core\" -B \"$BUILD_DIR\" -G \"Unix Makefiles\" \\\n    -DCMAKE_BUILD_TYPE=\"$CONFIGURATION\" \\\n    -DCMAKE_SYSTEM_NAME=iOS \\\n    -DCMAKE_OSX_SYSROOT=\"$SDKROOT\" \\\n    -DCMAKE_OSX_ARCHITECTURES=\"$(echo \"$ARCHS\" | tr ' ' ';')\" \\\n    -DCMAKE_OSX_DEPLOYMENT_TARGET=\"$IPHONEOS_DEPLOYMENT_TARGET\" \\\n    -DDESKHUB_CORE_TESTS=OFF\ncmake --build \"$BUILD_DIR\" -j \"$(sysctl -n hw.ncpu)\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin XCBuildConfiguration section */
 		BB1620C43011D2F5006CCD14 /* Debug */ = {
@@ -221,7 +212,7 @@
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_DYNAMIC_NO_PIC = NO;
 				GCC_NO_COMMON_BLOCKS = YES;
@@ -290,7 +281,7 @@
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
-				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GCC_C_LANGUAGE_STANDARD = gnu17;
 				GCC_NO_COMMON_BLOCKS = YES;
 				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
@@ -338,11 +329,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../out/build/ios-core/$(PLATFORM_NAME)-$(CONFIGURATION)";
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lcore";
 				PRODUCT_BUNDLE_IDENTIFIER = com.ios.deskhub;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "app/swift/Deskhub-Bridging-Header.h";
 				SWIFT_VERSION = 6.0;
@@ -373,11 +370,17 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = "$(SRCROOT)/../../out/build/ios-core/$(PLATFORM_NAME)-$(CONFIGURATION)";
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = "-lcore";
 				PRODUCT_BUNDLE_IDENTIFIER = com.ios.deskhub;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OBJC_BRIDGING_HEADER = "app/swift/Deskhub-Bridging-Header.h";
 				SWIFT_VERSION = 6.0;

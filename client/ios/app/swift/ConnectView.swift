@@ -11,16 +11,19 @@ struct ConnectView: View {
             Spacer()
 
             Image(systemName: "desktopcomputer")
-                .font(.system(size: 64))
+                .font(.system(size: 48))
                 .foregroundStyle(.secondary)
 
             Text("Deskhub")
                 .font(.largeTitle.bold())
 
             VStack(spacing: 12) {
+                // numbersAndPunctuation chứ KHÔNG phải decimalPad: decimalPad hiện dấu
+                // thập phân theo locale (máy tiếng Việt ra "," — không gõ nổi IP) và
+                // không có phím Return nên submitLabel(.go)/onSubmit không hoạt động.
                 TextField("Host IP address", text: $model.address)
                     .textFieldStyle(.roundedBorder)
-                    .keyboardType(.decimalPad)
+                    .keyboardType(.numbersAndPunctuation)
                     .autocorrectionDisabled()
                     .textInputAutocapitalization(.never)
                     .submitLabel(.go)
