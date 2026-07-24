@@ -26,6 +26,7 @@ add_executable(client WIN32
     ClientLoop.cpp
     ElevatedShare.cpp
     DiagLog.cpp
+    ClipboardSync.cpp
 
     client.rc
 

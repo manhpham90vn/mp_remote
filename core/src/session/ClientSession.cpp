@@ -100,6 +100,17 @@ bool ClientSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
             if (cb_.onReconfig) cb_.onReconfig(params_);
             return true;
         }
+        case MsgType::Clipboard: {
+            if (h->sessionId != sessionId_ || sessionId_ == 0) return false;
+            if (state_ != State::Starting && state_ != State::Streaming) return false;
+            const auto c = ParseClipboardChunk(payload);
+            if (!c) return false;
+            lastRecvUs_ = nowUs;
+            // Push trả văn bản đúng một lần khi đủ mảnh — mảnh trùng/lẻ là nullopt.
+            if (auto text = clip_.Push(*c); text && cb_.onClipboard)
+                cb_.onClipboard(std::move(*text));
+            return true;
+        }
         case MsgType::Bye:
             if (h->sessionId != sessionId_ || sessionId_ == 0) return false;
             Die("host ended the session (BYE)");
@@ -209,6 +220,24 @@ void ClientSession::SendInvalidateRef(uint32_t frameId) {
     if (state_ != State::Streaming) return;
     const size_t n = BuildInvalidateRef(buf_, sessionId_, frameId);
     if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
+}
+
+// Chia văn bản thành mảnh ≤ kMaxClipboardChunk rồi phát một loạt. Không ACK, không
+// phát lại: mất mảnh thì bản copy này bỏ, người dùng copy tiếp là có bản mới.
+void ClientSession::SendClipboard(std::string_view utf8) {
+    if (state_ != State::Streaming || !cb_.send) return;
+    if (utf8.empty() || utf8.size() > kMaxClipboardBytes) return;
+    const uint32_t id = ++clipUpdateId_;
+    const size_t count = (utf8.size() + kMaxClipboardChunk - 1) / kMaxClipboardChunk;
+    for (size_t i = 0; i < count; ++i) {
+        const size_t off = i * kMaxClipboardChunk;
+        const size_t len = utf8.size() - off < kMaxClipboardChunk ? utf8.size() - off
+                                                                  : kMaxClipboardChunk;
+        const auto* d = reinterpret_cast<const uint8_t*>(utf8.data()) + off;
+        const size_t n = BuildClipboardChunk(buf_, sessionId_, id, uint16_t(i),
+            uint16_t(count), std::span<const uint8_t>(d, len));
+        if (n) cb_.send(std::span<const uint8_t>(buf_, n));
+    }
 }
 
 void ClientSession::SendBye() {

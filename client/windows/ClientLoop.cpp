@@ -61,6 +61,7 @@
 #include <vector>
 
 #include "capture/GpuSelect.h"
+#include "ClipboardSync.h"
 #include "input/InputCapture.h"
 #include "decode/IVideoDecoder.h"
 #include "decode/Renderer.h"
@@ -137,6 +138,34 @@ struct ClientStream {
     std::thread recvThread;
 };
 
+// Clipboard máy này vừa đổi (GĐ8) — hộp thư MỘT CHIỀU từ thread clipboard sang các
+// thread Recv. Mỗi stream tự nhớ seq đã tiêu thụ nên không cần danh sách stream nào
+// ở phía ghi (thêm/bớt stream giữa chừng không đụng gì tới hộp thư này).
+struct SharedClipboardOut {
+    std::mutex mu;
+    std::string text; // bản copy gần nhất (UTF-8)
+    uint64_t seq = 0; // tăng mỗi lần copy — stream so với seq đã gửi
+};
+
+// GĐ8: xếp một tổ hợp phím vào hàng input của stream — nhấn theo thứ tự, nhả ngược
+// lại — như thể người dùng bấm được nó trong cửa sổ preview. Dùng cho các tổ hợp
+// mà Windows máy CLIENT chặn mất (Ctrl+Shift+Esc mở Task Manager của chính mình).
+void QueueKeyCombo(ClientStream& s, std::initializer_list<int> vks) {
+    auto key = [](int vk, bool down) {
+        deskhub::InputEvent e;
+        e.type = deskhub::InputType::Key;
+        e.timestampUs = NowUs();
+        e.a = vk;
+        e.b = int32_t(MapVirtualKeyW(UINT(vk), MAPVK_VK_TO_VSC));
+        e.state = down ? 1 : 0;
+        return e;
+    };
+    std::lock_guard<std::mutex> lk(s.inputMutex);
+    for (const int vk : vks) s.inputQueue.push_back(key(vk, true));
+    for (auto it = std::rbegin(vks); it != std::rend(vks); ++it)
+        s.inputQueue.push_back(key(*it, false));
+}
+
 // Vòng đời mạng + giải mã của một nguồn. Chạy trên thread Recv riêng của nguồn đó.
 //
 // Hàm dài nhất file, gồm ba phần:
@@ -149,7 +178,8 @@ struct ClientStream {
 // Gói Video đi THẲNG vào Reassembler, không qua ClientSession — đó là đường nóng,
 // mỗi giây hàng nghìn gói. ClientSession chỉ được báo bằng NotifyVideoPacket để
 // nuôi timeout và thoát khỏi trạng thái Starting.
-void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* device) {
+void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* device,
+    ClipboardSync* clip, SharedClipboardOut* clipOut) {
     std::unique_ptr<deskhub::Reassembler> reasm; // tạo sau khi biết fps đàm phán
     // Decoder tạo VÀ dùng trên thread Decode: MfDecoder init mất ~150ms, dựng nó
     // trên thread Recv là recvfrom ngừng nghe đúng lúc IDR mở màn đang dồn về
@@ -286,6 +316,10 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
         std::printf("[Client][%s] Disconnected: %s\n", s.src.name.c_str(), reason);
         s.quit.store(true);
     };
+    // GĐ8: host vừa copy văn bản -> đặt vào clipboard máy này (tự chống echo).
+    cb.onClipboard = [clip](std::string text) {
+        if (clip) clip->SetRemoteText(text);
+    };
     deskhub::ClientSession session(cb);
 
     deskhub::Hello hello;
@@ -300,6 +334,7 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
 
     uint8_t buf[deskhub::kMaxDatagram];
     deskhub::LinkStats linkStats(NowUs());
+    uint64_t clipSeqSent = 0; // seq của SharedClipboardOut đã tiêu thụ (GĐ8)
 
     while (!s.quit.load() && !g_ctrlC.load() && !s.failed.load()) {
         NetAddr from;
@@ -441,6 +476,22 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
         session.SetFocused(s.hasFocus.load(std::memory_order_relaxed));
         session.Tick(now);
         if (session.state() == deskhub::ClientSession::State::Dead) break;
+
+        // Clipboard máy này vừa đổi -> gửi cho host (GĐ8). Gửi trên thread này vì
+        // session (và buf_ của nó) chỉ thuộc thread này; SendClipboard tự bỏ qua
+        // khi chưa STREAMING — seq đã tiêu thụ rồi nên không gửi bù bản cũ.
+        if (clipOut) {
+            std::string t;
+            {
+                std::lock_guard<std::mutex> lk(clipOut->mu);
+                if (clipOut->seq != clipSeqSent) {
+                    clipSeqSent = clipOut->seq;
+                    if (session.state() == deskhub::ClientSession::State::Streaming)
+                        t = clipOut->text;
+                }
+            }
+            if (!t.empty()) session.SendClipboard(t);
+        }
 
         if (linkStats.Due(now)) {
             const auto st = reasm ? reasm->stats() : deskhub::Reassembler::Stats{};
@@ -607,6 +658,18 @@ int RunClient(const ClientOptions& opt) {
     ViewerWindow ui;
     ui.Start(opt.server, deskhub::kMaxSources);
 
+    // Đồng bộ clipboard (GĐ8). Khai báo TRƯỚC `streams`: thread Recv giữ con trỏ
+    // tới hai thứ này nên chúng phải sống lâu hơn (join ở cuối hàm, nhưng thứ tự
+    // hủy ngược khai báo là lưới an toàn). Copy ở máy này -> hộp thư -> thread Recv
+    // gửi; văn bản từ host -> SetRemoteText (tự chống vòng echo).
+    SharedClipboardOut clipOut;
+    ClipboardSync clipSync;
+    clipSync.Start([&clipOut](const std::string& utf8) {
+        std::lock_guard<std::mutex> lk(clipOut.mu);
+        clipOut.text = utf8;
+        ++clipOut.seq;
+    });
+
     std::vector<std::unique_ptr<ClientStream>> streams;
 
     // Dựng MỘT stream + phóng thread Recv của nó. Dùng cho cả nguồn ban đầu lẫn
@@ -628,8 +691,8 @@ int RunClient(const ClientOptions& opt) {
         s->sock.SetRecvTimeout(10);
         ClientStream* ps = s.get();
         streams.push_back(std::move(s)); // con trỏ ổn định — vector giữ unique_ptr
-        ps->recvThread = std::thread([ps, &opt, &gpu] {
-            StreamRecvLoop(*ps, opt, gpu.device.Get());
+        ps->recvThread = std::thread([ps, &opt, &gpu, &clipSync, &clipOut] {
+            StreamRecvLoop(*ps, opt, gpu.device.Get(), &clipSync, &clipOut);
         });
         return true;
     };
@@ -748,6 +811,12 @@ int RunClient(const ClientOptions& opt) {
                         input.ToggleRelativeMode();
                     else if (id == Renderer::kBtnPause)
                         input.TogglePause();
+                    else if (id == Renderer::kBtnHotkey) {
+                        // GĐ8: tổ hợp Windows máy này chặn mất — gửi hộ qua kênh
+                        // input như chuỗi phím thường (host bơm bằng scancode).
+                        QueueKeyCombo(*ps, {VK_CONTROL, VK_SHIFT, VK_ESCAPE});
+                        return;
+                    }
                     ps->renderer.SetToggleState(input.relativeMode(), !input.enabled());
                 });
                 s->rendererReady.store(true, std::memory_order_release);

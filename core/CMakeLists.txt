@@ -20,6 +20,7 @@ add_library(core STATIC
 
     src/session/HostSession.cpp
     src/session/ClientSession.cpp
+    src/session/ClipboardAssembler.cpp
 
     src/input/InputSender.cpp
     src/input/InputReceiver.cpp

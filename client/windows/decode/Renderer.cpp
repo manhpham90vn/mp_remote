@@ -58,6 +58,11 @@ using Microsoft::WRL::ComPtr;
 namespace {
 constexpr wchar_t kWndClass[] = L"LoopbackPreviewWnd";
 constexpr wchar_t kVideoClass[] = L"LoopbackVideoHost";
+constexpr wchar_t kOverlayClass[] = L"LoopbackOverlayWnd";
+
+// Kích thước dải nút overlay — dùng chung giữa CreateOverlay và SyncOverlayPos.
+constexpr int kBtnW = 130, kBtnH = 24, kBtnPad = 8;
+constexpr int kOverlayW = 3 * kBtnW + 2 * kBtnPad;
 
 // Thủ tục của child window chứa video. HTTRANSPARENT để mọi cú chuột "xuyên" qua
 // nó rơi về cửa sổ cha — InputCapture móc vào WndProc của cha nên không được để
@@ -70,9 +75,11 @@ LRESULT CALLBACK VideoHostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 
 struct Renderer::Impl {
     HWND hwnd = nullptr;
-    HWND videoHwnd = nullptr; // child chứa swapchain — xem ghi chú ở Init
+    HWND videoHwnd = nullptr;   // child chứa swapchain — xem ghi chú ở Init
+    HWND overlayWnd = nullptr;  // popup OWNED chứa 3 nút — xem CreateOverlay
     HWND btnLock = nullptr;
     HWND btnPause = nullptr;
+    HWND btnHotkey = nullptr;      // GĐ8: gửi Ctrl+Shift+Esc sang host
     std::wstring baseTitle;        // tiêu đề gốc — SetStatusText ghép số liệu vào sau
     Renderer::CommandHook cmdHook; // GD5: nút overlay -> bên ngoài
     ComPtr<ID3D11Device> device;
@@ -96,7 +103,7 @@ struct Renderer::Impl {
     Renderer::MessageHook msgHook; // chỉ đọc/ghi trên luồng message (main)
 
     ~Impl() {
-        if (hwnd) DestroyWindow(hwnd); // hủy cả child (video host + 2 nút)
+        if (hwnd) DestroyWindow(hwnd); // hủy cả child + overlay (owned window)
     }
 
     static LRESULT CALLBACK WndProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
@@ -111,13 +118,29 @@ struct Renderer::Impl {
             case WM_KEYDOWN:
                 if (wp == VK_ESCAPE && self) self->closed.store(true);
                 return 0;
+            case WM_WINDOWPOSCHANGED:
+                // Cửa sổ vừa di chuyển/ẩn/hiện — kéo dải nút overlay theo.
+                if (self) self->SyncOverlayPos();
+                break; // vẫn để DefWindowProc sinh WM_MOVE/WM_SIZE như thường
+        }
+        return DefWindowProcW(h, msg, wp, lp);
+    }
+
+    // Thủ tục của dải nút overlay. MA_NOACTIVATE: bấm nút không được cướp focus
+    // của cửa sổ preview — InputCapture gắn theo cửa sổ đang foreground, đổi focus
+    // là nó rời đi và input ngừng gửi.
+    static LRESULT CALLBACK OverlayProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+        auto* self = (Impl*)GetWindowLongPtrW(h, GWLP_USERDATA);
+        switch (msg) {
+            case WM_MOUSEACTIVATE:
+                return MA_NOACTIVATE;
             case WM_COMMAND:
-                // GD5: 2 nút overlay (kBtnLock/kBtnPause) -> báo ra ngoài, giống hệt
-                // đường phím tắt F9/F10. Renderer không tự đổi trạng thái nút - bên
-                // ngoài gọi lại SetToggleState() sau khi xử lý xong.
+                // Nút -> báo ra ngoài, giống hệt đường phím tắt F9/F10. Renderer
+                // không tự đổi trạng thái nút - bên ngoài gọi lại SetToggleState().
                 if (self && self->cmdHook && HIWORD(wp) == BN_CLICKED) {
                     const int id = LOWORD(wp);
-                    if (id == Renderer::kBtnLock || id == Renderer::kBtnPause)
+                    if (id == Renderer::kBtnLock || id == Renderer::kBtnPause ||
+                        id == Renderer::kBtnHotkey)
                         self->cmdHook(id);
                 }
                 return 0;
@@ -125,27 +148,60 @@ struct Renderer::Impl {
         return DefWindowProcW(h, msg, wp, lp);
     }
 
-    // GD5: 2 nút khóa chuột/tạm dừng góc trên-phải, bằng child window thường. DWM
-    // chỉ ghép chúng LÊN TRÊN video vì swapchain nằm ở child videoHwnd dưới đáy
-    // z-order (xem Init) — gắn swapchain thẳng vào cha là chúng bị visual của
-    // swapchain che mất. Dòng số liệu KHÔNG là overlay: nó nằm trên thanh tiêu đề
-    // (SetStatusText) nên không che video. Gọi sau khi `hwnd` + clientW/H đã có.
+    // Các nút KHÔNG là child của cửa sổ preview mà nằm trong một POPUP RIÊNG do
+    // preview làm owner. Lý do: child GDI vẽ vào chung redirection surface với
+    // cửa sổ cha, mà DWM ghép visual của swapchain ĐÈ lên surface đó — mọi chiêu
+    // trong cùng cửa sổ (z-order, WS_EX_LAYERED, WS_CLIPSIBLINGS) đều đã thử và
+    // thua (24/07/2026). Owned window là cửa sổ TOP-LEVEL có surface riêng, luôn
+    // nằm trên owner theo luật z-order của Windows — không còn gì để tranh chấp.
+    // Dòng số liệu không cần chiêu này: nó nằm trên thanh tiêu đề (SetStatusText).
     void CreateOverlay() {
+        WNDCLASSW oc{};
+        oc.lpfnWndProc = OverlayProc;
+        oc.hInstance = GetModuleHandleW(nullptr);
+        oc.lpszClassName = kOverlayClass;
+        oc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        oc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+        RegisterClassW(&oc); // lần hai trở đi ALREADY_EXISTS — không sao
+
+        // WS_EX_NOACTIVATE đi cùng MA_NOACTIVATE ở trên; WS_EX_TOOLWINDOW để dải
+        // nút không có mặt trên taskbar/Alt-Tab như một "cửa sổ" thật.
+        overlayWnd = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kOverlayClass,
+            L"", WS_POPUP, 0, 0, kOverlayW, kBtnH,
+            hwnd /*owner*/, nullptr, GetModuleHandleW(nullptr), nullptr);
+        if (!overlayWnd) return;
+        SetWindowLongPtrW(overlayWnd, GWLP_USERDATA, (LONG_PTR)this);
+
         const HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
-
-        const int btnW = 130, btnH = 24, pad = 8;
-        btnLock = CreateWindowExW(0, L"BUTTON", L"\U0001F512 Lock mouse (F9)",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_PUSHLIKE,
-            (int)clientW - pad - 2 * btnW - pad, pad, btnW, btnH,
-            hwnd, (HMENU)(INT_PTR)Renderer::kBtnLock, GetModuleHandleW(nullptr), nullptr);
-
-        btnPause = CreateWindowExW(0, L"BUTTON", L"⏸ Pause (F10)",
-            WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX | BS_PUSHLIKE,
-            (int)clientW - pad - btnW, pad, btnW, btnH,
-            hwnd, (HMENU)(INT_PTR)Renderer::kBtnPause, GetModuleHandleW(nullptr), nullptr);
-
-        for (HWND c : {btnLock, btnPause})
+        auto mkBtn = [&](const wchar_t* text, DWORD style, int x, int id) {
+            HWND c = CreateWindowExW(0, L"BUTTON", text, WS_CHILD | WS_VISIBLE | style,
+                x, 0, kBtnW, kBtnH, overlayWnd, (HMENU)(INT_PTR)id,
+                GetModuleHandleW(nullptr), nullptr);
             if (c) SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
+            return c;
+        };
+        // GĐ8: nút gửi Ctrl+Shift+Esc — bấm tổ hợp thật thì Windows máy client
+        // nuốt mất (mở Task Manager của chính mình) nên phải đi đường nút bấm.
+        btnHotkey = mkBtn(L"⌨ Ctrl+Shift+Esc", BS_PUSHBUTTON, 0, Renderer::kBtnHotkey);
+        btnLock = mkBtn(L"\U0001F512 Lock mouse (F9)", BS_AUTOCHECKBOX | BS_PUSHLIKE,
+            kBtnW + kBtnPad, Renderer::kBtnLock);
+        btnPause = mkBtn(L"⏸ Pause (F10)", BS_AUTOCHECKBOX | BS_PUSHLIKE,
+            2 * (kBtnW + kBtnPad), Renderer::kBtnPause);
+        SyncOverlayPos();
+    }
+
+    // Đặt dải nút bám góc trên-phải vùng client của preview; preview ẩn/thu nhỏ
+    // thì dải nút ẩn theo. Gọi từ CreateOverlay và mỗi WM_WINDOWPOSCHANGED.
+    void SyncOverlayPos() {
+        if (!overlayWnd) return;
+        if (IsIconic(hwnd) || !IsWindowVisible(hwnd)) {
+            ShowWindow(overlayWnd, SW_HIDE);
+            return;
+        }
+        POINT tr{(LONG)clientW - kBtnPad - kOverlayW, kBtnPad};
+        ClientToScreen(hwnd, &tr);
+        SetWindowPos(overlayWnd, HWND_TOP, tr.x, tr.y, kOverlayW, kBtnH,
+            SWP_NOACTIVATE | SWP_SHOWWINDOW);
     }
 
     bool Init(ID3D11Device* dev, uint32_t srcW, uint32_t srcH, const wchar_t* title) {
@@ -215,7 +271,8 @@ struct Renderer::Impl {
         vc.hInstance = wc.hInstance;
         vc.lpszClassName = kVideoClass;
         RegisterClassW(&vc); // lần hai trở đi trả ALREADY_EXISTS — không sao
-        videoHwnd = CreateWindowExW(0, kVideoClass, L"", WS_CHILD | WS_VISIBLE,
+        videoHwnd = CreateWindowExW(0, kVideoClass, L"",
+            WS_CHILD | WS_VISIBLE | WS_CLIPSIBLINGS,
             0, 0, (int)clientW, (int)clientH, hwnd, nullptr, wc.hInstance, nullptr);
         if (!videoHwnd) {
             std::printf("[Renderer] CreateWindow (video host) failed.\n");

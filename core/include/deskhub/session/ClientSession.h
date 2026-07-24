@@ -41,11 +41,14 @@
 //            deskhub/transport/Reassembler.h, deskhub/control/LinkStats.h
 // =============================================================================
 #include "deskhub/input/InputSender.h"
+#include "deskhub/session/ClipboardAssembler.h"
 #include "deskhub/wire/Wire.h"
 
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <string>
+#include <string_view>
 
 namespace deskhub {
 
@@ -77,6 +80,8 @@ struct ClientCallbacks {
     std::function<void(const NegotiatedParams&)> onReconfig;
     std::function<void(uint32_t rttUs)> onRtt;            // mỗi PONG
     std::function<void(const char* reason)> onDisconnect; // từ chối/BYE/timeout
+    // GĐ8: host vừa copy văn bản — caller đặt vào clipboard máy mình.
+    std::function<void(std::string text)> onClipboard;
 };
 
 class ClientSession {
@@ -130,6 +135,10 @@ public:
     // Báo host đã bỏ hẳn `frameId` để nó thôi tham chiếu (GĐ7). Bỏ qua nếu chưa STREAMING.
     void SendInvalidateRef(uint32_t frameId);
 
+    // Gửi văn bản clipboard của máy mình cho host (GĐ8), tự chia mảnh. Bỏ qua nếu
+    // chưa STREAMING, text rỗng hoặc quá kMaxClipboardBytes.
+    void SendClipboard(std::string_view utf8);
+
     // Báo host mình rời đi (gửi 1 lần, best-effort) và kết thúc phiên.
     void SendBye();
 
@@ -169,6 +178,8 @@ private:
     uint32_t nextPingId_ = 1;
     uint32_t lastRttUs_ = 0;
     bool keyframeWanted_ = false;
+    ClipboardAssembler clip_;   // ghép mảnh clipboard từ host (GĐ8)
+    uint32_t clipUpdateId_ = 0; // updateId của lần SendClipboard kế tiếp
     uint8_t buf_[kMaxDatagram] = {};
 };
 

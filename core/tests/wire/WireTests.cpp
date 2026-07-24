@@ -8,7 +8,9 @@
 #include "Tests.h"
 #include "support/TestSupport.h"
 
+#include <algorithm>
 #include <cstdio>
+#include <cstring>
 #include <vector>
 
 using namespace deskhub;
@@ -361,6 +363,55 @@ void TestSourceListTruncation() {
     }
 }
 
+// CLIPBOARD (GĐ8): khứ hồi một mảnh + các đường lỗi build/parse.
+void TestClipboardWire() {
+    std::printf("[wire] CLIPBOARD chunk round-trip + error paths...\n");
+    uint8_t buf[kMaxDatagram];
+
+    const char* text = "hello clipboard \xE1\xBA\xA1"; // kèm UTF-8 nhiều byte
+    const auto data = std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t*>(text), std::strlen(text));
+    size_t n = BuildClipboardChunk(buf, 0xCAFE0001, 7, 1, 3, data);
+    Check(n > 0, "BuildClipboardChunk succeeded");
+    const auto h = ParseCommonHeader(std::span<const uint8_t>(buf, n));
+    Check(h && h->type == MsgType::Clipboard && h->chan == Chan::Control &&
+              h->sessionId == 0xCAFE0001,
+        "CLIPBOARD header");
+    auto c = ParseClipboardChunk(PayloadOf(std::span<const uint8_t>(buf, n)));
+    Check(c && c->updateId == 7 && c->chunkIndex == 1 && c->chunkCount == 3,
+        "CLIPBOARD ids survive round-trip");
+    Check(c && c->data.size() == data.size() &&
+              std::equal(c->data.begin(), c->data.end(), data.begin()),
+        "CLIPBOARD data survives round-trip");
+
+    // Lỗi build: data rỗng / quá khổ / chỉ số vô nghĩa / bộ đệm chật.
+    Check(BuildClipboardChunk(buf, 1, 1, 0, 1, {}) == 0, "empty chunk -> 0");
+    std::vector<uint8_t> big(kMaxClipboardChunk + 1, 0x41);
+    Check(BuildClipboardChunk(buf, 1, 1, 0, 1, big) == 0, "oversized chunk -> 0");
+    Check(BuildClipboardChunk(buf, 1, 1, 3, 3, data) == 0, "chunkIndex >= chunkCount -> 0");
+    Check(BuildClipboardChunk(buf, 1, 1, 0, 0, data) == 0, "chunkCount == 0 -> 0");
+    uint8_t tiny[10];
+    Check(BuildClipboardChunk(tiny, 1, 1, 0, 1, data) == 0, "too-small buffer -> 0");
+
+    // Lỗi parse: payload cụt (thiếu data), chỉ số vô nghĩa, mảnh quá khổ.
+    Check(!ParseClipboardChunk(std::span<const uint8_t>(buf, kClipboardHeaderSize)).has_value(),
+        "chunk without data rejected");
+    {
+        Datagram d(kClipboardHeaderSize + 4, 0);
+        d[6] = 0; // chunkCount = 0
+        d[7] = 0;
+        Check(!ParseClipboardChunk(d).has_value(), "parse chunkCount == 0 rejected");
+        d[7] = 2;
+        d[5] = 5; // chunkIndex = 5 >= 2
+        Check(!ParseClipboardChunk(d).has_value(), "parse chunkIndex >= chunkCount rejected");
+    }
+    {
+        Datagram d(kClipboardHeaderSize + kMaxClipboardChunk + 1, 0);
+        d[7] = 1; // chunkCount = 1, index 0
+        Check(!ParseClipboardChunk(d).has_value(), "oversized chunk payload rejected");
+    }
+}
+
 // Đầu vào rác thuần ngẫu nhiên (PRNG xác định): mọi Parse* phải trả nullopt/0 hoặc
 // kết quả kẹp trong biên — tuyệt đối không đọc ngoài biên. Test này không assert
 // nội dung; răng của nó là chạy dưới debug CRT / sanitizer.
@@ -379,6 +430,7 @@ void TestParseGarbage() {
         ParseReconfig(pl);
         ParseSetFocus(pl);
         ParseInvalidateRef(pl);
+        ParseClipboardChunk(pl);
         SourceInfo so[kMaxSources];
         ParseSourceList(pl, so);
         uint32_t fid = 0;
@@ -406,5 +458,6 @@ void RunWireTests() {
     TestWireCoverage();
     TestFecWireErrors();
     TestSourceListTruncation();
+    TestClipboardWire();
     TestParseGarbage();
 }

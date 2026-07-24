@@ -57,6 +57,7 @@
 #include "capture/GpuSelect.h"
 #include "ElevatedShare.h" // IsProcessElevated — chẩn đoán UIPI khi bật điều khiển
 #include "net/Firewall.h"  // tự mở firewall để client không bị timeout
+#include "ClipboardSync.h"
 #include "input/InputInjector.h"
 #include "input/LocalInputMonitor.h" // "host thắng" khi hai bên cùng điều khiển
 #include "encode/IVideoEncoder.h"
@@ -560,6 +561,19 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         return 1;
     }
 
+    // Đồng bộ clipboard (GĐ8). clipMu/clipPending* khai báo TRƯỚC clipSync: callback
+    // của nó chạm vào chúng nên phải sống lâu hơn (hủy ngược thứ tự khai báo).
+    // Copy ở máy host -> hộp thư -> vòng Recv gửi qua phiên đang streaming đầu tiên.
+    std::mutex clipMu;
+    std::string clipPendingText;
+    bool clipPending = false;
+    ClipboardSync clipSync;
+    clipSync.Start([&clipMu, &clipPendingText, &clipPending](const std::string& utf8) {
+        std::lock_guard<std::mutex> lk(clipMu);
+        clipPendingText = utf8;
+        clipPending = true;
+    });
+
     // --- Dựng phiên + injector cho từng nguồn còn sống ---
     // Tách thành hàm vì cũng được gọi ở HAI chỗ: các nguồn ban đầu ngay dưới, và
     // nguồn thêm giữa phiên (trong vòng Recv, khi frame đầu của nó về).
@@ -604,6 +618,9 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             }
         };
         cb.onInput = [p](const deskhub::InputEvent& e) { p->injector.Apply(e); };
+        // GĐ8: client vừa copy văn bản -> đặt vào clipboard máy host. ClipboardSync
+        // tự khử trùng nội dung nên nhiều phiên cùng gửi một bản copy cũng vô hại.
+        cb.onClipboard = [&clipSync](std::string text) { clipSync.SetRemoteText(text); };
         // Client chuyển cửa sổ preview -> kéo đúng cửa sổ nguồn đó lên foreground.
         // Chia sẻ nhiều nguồn thì chỉ một cửa sổ được foreground, mà SendInput bơm
         // vào cửa sổ foreground; không có bước này thì client xem N nguồn nhưng chỉ
@@ -857,6 +874,33 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                         std::printf("[Agent][%s] Peer: %s\n", dst->name.c_str(),
                             from.ToString().c_str());
                     }
+                }
+            }
+        }
+
+        // Clipboard máy host vừa đổi -> gửi cho client (GĐ8). Gửi qua phiên ĐANG
+        // streaming đầu tiên là đủ: các phiên đều là cùng một client, và bên nhận
+        // khử trùng theo nội dung. replyAddr phải đặt về peer của phiên đó vì send
+        // callback của session gửi theo replyAddr (bình thường do gói đến đặt).
+        {
+            std::string t;
+            {
+                std::lock_guard<std::mutex> lk(clipMu);
+                if (clipPending) {
+                    t = std::move(clipPendingText);
+                    clipPending = false;
+                }
+            }
+            if (!t.empty()) {
+                for (SourcePipeline* p : live) {
+                    if (p->failed.load() || !p->session ||
+                        p->session->state() != deskhub::HostSession::State::Streaming)
+                        continue;
+                    const uint64_t pp = p->peerPacked.load(std::memory_order_acquire);
+                    if (!pp) continue;
+                    replyAddr = NetAddr::Unpack(pp);
+                    p->session->SendClipboard(t);
+                    break;
                 }
             }
         }

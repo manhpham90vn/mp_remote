@@ -58,6 +58,7 @@ Sau header 8 byte là payload tùy `Type`.
 | 0x35 | SET_FOCUS | control | C→A | phát lặp 3× |
 | 0x36 | NACK | control | C→A | không (best-effort) |
 | 0x37 | INVALIDATE_REF | control | C→A | không (best-effort) |
+| 0x38 | CLIPBOARD | control | cả hai | không (best-effort) |
 
 ## 3c. Gửi lại theo NACK và huỷ khung tham chiếu (GĐ7)
 
@@ -334,6 +335,23 @@ bao giờ bấm sang được ứng dụng của chính mình — đổi lại p
 đổi phát 3 lần cách nhau 50 ms. Host xử lý idempotent (đã foreground thì không làm gì).
 SET_FOCUS đi **trước** INPUT_EVENT trong cùng chu kỳ Tick, không thì mấy phím đầu tiên
 sau khi đổi cửa sổ bị host bỏ vì cửa sổ chưa kịp lên trước.
+
+### CLIPBOARD (0x38) — đồng bộ clipboard văn bản (GĐ8)
+| Trường | Kiểu | Ý nghĩa |
+|--------|------|---------|
+| updateId | u32 | Đổi theo mỗi lần copy — khoá ghép mảnh. |
+| chunkIndex | u16 | 0..chunkCount-1. |
+| chunkCount | u16 | Tổng số mảnh của lần copy này. |
+| data | bytes | UTF-8, 1..1184 byte (phần còn lại của datagram). |
+
+Hai chiều, chỉ khi STREAMING. Văn bản UTF-8 có thể vượt một datagram nên chia mảnh
+≤ 1184 byte; bên nhận (`ClipboardAssembler`) ghép đủ `chunkCount` mảnh — lạc thứ tự
+được — rồi mới đặt vào clipboard. Chỉ giữ MỘT update đang ghép: `updateId` mới tới
+là bản dở dang cũ bị bỏ, vì chỉ bản copy mới nhất có nghĩa. Trần **64 KB** một lần
+copy — quá thì bên gửi không gửi, bên nhận huỷ (chống khai điêu). Best-effort,
+không ACK/không phát lại: mất mảnh thì bản copy đó bỏ qua, người dùng copy tiếp là
+có bản mới. Vòng echo (đặt clipboard → listener máy đó bắn tiếp) chặn ở tầng nền
+tảng bằng cách nhớ văn bản vừa đặt/vừa đọc và bỏ update trùng nội dung.
 
 ## 8. Máy trạng thái phiên
 

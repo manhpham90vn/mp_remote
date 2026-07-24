@@ -314,6 +314,24 @@ size_t BuildInputEvents(std::span<uint8_t> out, uint32_t sessionId, uint32_t fir
     return total;
 }
 
+// CLIPBOARD: một mảnh văn bản của lần copy `updateId`. Đi trên kênh Control, hai
+// chiều. Mỗi mảnh tự đủ thông tin ghép (updateId + index/count) nên lạc thứ tự
+// hay mất mảnh đều xử được ở ClipboardAssembler, không cần ACK.
+size_t BuildClipboardChunk(std::span<uint8_t> out, uint32_t sessionId, uint32_t updateId,
+    uint16_t chunkIndex, uint16_t chunkCount, std::span<const uint8_t> data) {
+    if (data.empty() || data.size() > kMaxClipboardChunk) return 0;
+    if (chunkCount == 0 || chunkIndex >= chunkCount) return 0;
+    const size_t total = WriteCommon(out, MsgType::Clipboard, 0, Chan::Control, sessionId,
+        kClipboardHeaderSize + data.size());
+    if (!total) return 0;
+    uint8_t* p = out.data() + kCommonHeaderSize;
+    PutU32(p, updateId);
+    PutU16(p + 4, chunkIndex);
+    PutU16(p + 6, chunkCount);
+    std::memcpy(p + kClipboardHeaderSize, data.data(), data.size());
+    return total;
+}
+
 // ---------------------------------------------------------------------------
 // PHẦN GIẢI MÃ. Từ đây trở xuống, dữ liệu vào ĐẾN TỪ MẠNG và không được tin.
 // Mọi hàm kiểm tra độ dài trước khi đọc; gói không hợp lệ trả nullopt/0 chứ không
@@ -488,6 +506,21 @@ std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,
     // groupIndex phải nhỏ hơn số nhóm xen kẽ, không thì nó không phủ gói nào.
     const size_t numGroups = (size_t(v.hdr.pktCount) + kFecGroupSize - 1) / kFecGroupSize;
     if (v.hdr.groupIndex >= numGroups) return std::nullopt;
+    return v;
+}
+
+// Đối xứng với BuildClipboardChunk. index/count do bên gửi khai — kiểm tra như mọi
+// trường không tin được khác; mảnh quá khổ (vượt kMaxClipboardChunk) là gói dựng.
+std::optional<ClipboardChunkView> ParseClipboardChunk(std::span<const uint8_t> payload) {
+    if (payload.size() < kClipboardHeaderSize + 1) return std::nullopt; // phải có ≥1 byte data
+    if (payload.size() > kClipboardHeaderSize + kMaxClipboardChunk) return std::nullopt;
+    const uint8_t* p = payload.data();
+    ClipboardChunkView v;
+    v.updateId = GetU32(p);
+    v.chunkIndex = GetU16(p + 4);
+    v.chunkCount = GetU16(p + 6);
+    if (v.chunkCount == 0 || v.chunkIndex >= v.chunkCount) return std::nullopt;
+    v.data = payload.subspan(kClipboardHeaderSize);
     return v;
 }
 

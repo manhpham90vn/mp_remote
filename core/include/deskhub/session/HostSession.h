@@ -36,12 +36,15 @@
 //            client/windows/AgentLoop.cpp (người dùng), docs/04-protocol.md
 // =============================================================================
 #include "deskhub/input/InputReceiver.h"
+#include "deskhub/session/ClipboardAssembler.h"
 #include "deskhub/wire/Wire.h"
 
 #include <atomic>
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <string>
+#include <string_view>
 
 namespace deskhub {
 
@@ -80,6 +83,8 @@ struct HostCallbacks {
     // chiếu frame đó nữa (NvEncInvalidateRefFrames) để phục hồi bằng P-frame rẻ thay
     // vì IDR nặng; encoder không làm được thì đành force IDR như cũ.
     std::function<void(uint32_t frameId)> onInvalidateRef;
+    // GĐ8: client vừa copy văn bản — caller đặt vào clipboard máy host.
+    std::function<void(std::string text)> onClipboard;
 };
 
 class HostSession {
@@ -102,6 +107,11 @@ public:
     bool HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs);
     void Tick(uint64_t nowUs);
 
+    // Gửi văn bản clipboard của máy host cho client (GĐ8), tự chia mảnh. Bỏ qua
+    // nếu chưa STREAMING, text rỗng hoặc quá kMaxClipboardBytes. Gọi trên thread
+    // Recv (dùng chung buf_ với các đường gửi khác).
+    void SendClipboard(std::string_view utf8);
+
     State state() const {
         return state_.load(std::memory_order_acquire);
     }
@@ -120,6 +130,8 @@ private:
     HostCallbacks cb_;
     StreamParams offer_;
     InputReceiver input_;
+    ClipboardAssembler clip_;   // ghép mảnh clipboard từ client (GĐ8)
+    uint32_t clipUpdateId_ = 0; // updateId của lần SendClipboard kế tiếp
     std::atomic<State> state_{State::Idle};
     std::atomic<uint32_t> sessionId_{0};
     uint32_t clientId_ = 0;

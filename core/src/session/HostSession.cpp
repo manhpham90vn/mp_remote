@@ -122,6 +122,16 @@ bool HostSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
             if (fid && cb_.onInvalidateRef) cb_.onInvalidateRef(*fid);
             return true;
         }
+        case MsgType::Clipboard: {
+            if (state() != State::Streaming || h->sessionId != sessionId()) return false;
+            const auto c = ParseClipboardChunk(payload);
+            if (!c) return false;
+            lastRecvUs_ = nowUs;
+            // Push trả văn bản đúng một lần khi đủ mảnh — mảnh trùng/lẻ là nullopt.
+            if (auto text = clip_.Push(*c); text && cb_.onClipboard)
+                cb_.onClipboard(std::move(*text));
+            return true;
+        }
         case MsgType::Bye:
             if (state() == State::Idle || h->sessionId != sessionId()) return false;
             Disconnect();
@@ -137,6 +147,24 @@ bool HostSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
 void HostSession::Tick(uint64_t nowUs) {
     if (state() == State::Idle) return;
     if (nowUs - lastRecvUs_ > kSessionTimeoutUs) Disconnect();
+}
+
+// Chia văn bản thành mảnh ≤ kMaxClipboardChunk rồi phát một loạt — cùng chính sách
+// best-effort với ClientSession::SendClipboard (xem ghi chú ở đó).
+void HostSession::SendClipboard(std::string_view utf8) {
+    if (state() != State::Streaming || !cb_.send) return;
+    if (utf8.empty() || utf8.size() > kMaxClipboardBytes) return;
+    const uint32_t id = ++clipUpdateId_;
+    const size_t count = (utf8.size() + kMaxClipboardChunk - 1) / kMaxClipboardChunk;
+    for (size_t i = 0; i < count; ++i) {
+        const size_t off = i * kMaxClipboardChunk;
+        const size_t len = utf8.size() - off < kMaxClipboardChunk ? utf8.size() - off
+                                                                  : kMaxClipboardChunk;
+        const auto* d = reinterpret_cast<const uint8_t*>(utf8.data()) + off;
+        const size_t n = BuildClipboardChunk(buf_, sessionId(), id, uint16_t(i),
+            uint16_t(count), std::span<const uint8_t>(d, len));
+        if (n) cb_.send(std::span<const uint8_t>(buf_, n));
+    }
 }
 
 void HostSession::SendHelloAck(uint64_t nowUs) {
@@ -166,7 +194,10 @@ void HostSession::Disconnect() {
     state_.store(State::Idle, std::memory_order_release);
     sessionId_.store(0, std::memory_order_relaxed);
     clientId_ = 0;
-    input_.Reset();                           // client sau bắt đầu lại từ seq 0
+    input_.Reset(); // client sau bắt đầu lại từ seq 0
+    // Quên clipboard đang ghép dở: client sau đánh updateId lại từ đầu, giữ trạng
+    // thái cũ thì mảnh đầu của nó có thể bị nhận nhầm là "bản đã áp dụng".
+    clip_ = ClipboardAssembler{};
     if (cb_.onDisconnect) cb_.onDisconnect(); // caller nhả hết phím đang giữ
 }
 

@@ -86,6 +86,18 @@ inline constexpr size_t kNackHeaderSize = 5; // frameId(u32) + count(u8)
 inline constexpr size_t kMaxNackIndices =
     (kMaxDatagram - kCommonHeaderSize - kNackHeaderSize) / 2; // 593
 
+// CLIPBOARD (GĐ8): đồng bộ clipboard văn bản HAI CHIỀU. Văn bản UTF-8 có thể vượt
+// một datagram nên chia mảnh: updateId đổi theo mỗi lần copy, bên nhận ghép đủ
+// chunkCount mảnh (lạc thứ tự được) rồi mới áp dụng — xem ClipboardAssembler.
+// Best-effort như phần còn lại của kênh control: mất mảnh thì bản copy đó bỏ,
+// lần copy sau tự thay thế.
+inline constexpr size_t kClipboardHeaderSize = 8; // updateId(4) chunkIndex(2) chunkCount(2)
+inline constexpr size_t kMaxClipboardChunk =
+    kMaxDatagram - kCommonHeaderSize - kClipboardHeaderSize; // 1184
+// Trần MỘT lần copy. 64 KB văn bản là rất nhiều; to hơn thường là dữ liệu nhị phân
+// dán nhầm, mà mỗi lần copy phát ~56 datagram liền nhau đã là cả một cụm burst.
+inline constexpr size_t kMaxClipboardBytes = 64 * 1024;
+
 enum class Chan : uint8_t { Control = 0,
     Video = 1,
     Input = 2,
@@ -109,6 +121,7 @@ enum class MsgType : uint8_t {
     SetFocus = 0x35,      // GĐ6: client báo cửa sổ preview của nguồn này vừa được focus
     Nack = 0x36,          // GĐ7: client xin host GỬI LẠI các mảnh video còn thiếu của 1 frame
     InvalidateRef = 0x37, // GĐ7: client báo đã bỏ hẳn 1 frame → host đừng tham chiếu nó nữa
+    Clipboard = 0x38,     // GĐ8: một mảnh văn bản clipboard (hai chiều)
 };
 
 // Flags của VIDEO_PACKET
@@ -250,6 +263,14 @@ struct FecPacketView {
     std::span<const uint8_t> parity;
 };
 
+// Một mảnh của một lần copy clipboard (GĐ8). `data` trỏ vào datagram gốc.
+struct ClipboardChunkView {
+    uint32_t updateId = 0;   // đổi theo mỗi lần copy — khoá ghép mảnh
+    uint16_t chunkIndex = 0; // 0..chunkCount-1
+    uint16_t chunkCount = 0;
+    std::span<const uint8_t> data; // UTF-8, 1..kMaxClipboardChunk byte
+};
+
 // ---- Build: ghi trọn một datagram (header chung + payload) vào out.
 // Trả về số byte đã ghi, hoặc 0 nếu out không đủ chỗ. ----
 size_t BuildHello(std::span<uint8_t> out, const Hello& m);
@@ -282,6 +303,10 @@ size_t BuildFecPacket(std::span<uint8_t> out, uint32_t sessionId, const FecHeade
 // Trả 0 nếu events rỗng, quá kMaxInputEvents, hoặc out thiếu chỗ.
 size_t BuildInputEvents(std::span<uint8_t> out, uint32_t sessionId, uint32_t firstSeq,
     std::span<const InputEvent> events);
+// CLIPBOARD: một mảnh của lần copy `updateId`. Trả 0 nếu data rỗng/quá
+// kMaxClipboardChunk, chunkIndex/chunkCount vô nghĩa, hoặc out thiếu chỗ.
+size_t BuildClipboardChunk(std::span<uint8_t> out, uint32_t sessionId, uint32_t updateId,
+    uint16_t chunkIndex, uint16_t chunkCount, std::span<const uint8_t> data);
 
 // ---- Parse. Trả về nullopt nếu gói ngắn/sai phiên bản. ----
 std::optional<CommonHeader> ParseCommonHeader(std::span<const uint8_t> datagram);
@@ -311,5 +336,7 @@ std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,
 // và đặt `firstSeq`; 0 nếu gói hỏng/rỗng/không khớp count.
 size_t ParseInputEvents(std::span<const uint8_t> payload, uint32_t& firstSeq,
     std::span<InputEvent> out);
+// Giải mã một mảnh CLIPBOARD. nullopt nếu gói cụt/chỉ số vô nghĩa/mảnh quá khổ.
+std::optional<ClipboardChunkView> ParseClipboardChunk(std::span<const uint8_t> payload);
 
 } // namespace deskhub
