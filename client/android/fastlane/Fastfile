@@ -48,14 +48,22 @@ platform :android do
   # Store listing quản bằng file txt trong fastlane/metadata/android/<locale>/
   # (supply): title/short_description/full_description.txt. Sửa chữ = sửa file
   # txt rồi chạy lane này (CI: workflow metadata.yml) — không build lại.
-  # skip_upload_changelogs: changelog phải gắn vào một versionCode ĐÃ có trên
-  # Play (app chưa có release nào thì fail "Could not find release for version
-  # code") — nó được lane release gắn kèm lúc upload AAB, không đẩy từ đây.
+  #
+  # HAI RÀNG BUỘC của supply (đọc từ source uploader.rb — perform_upload_meta):
+  #   1. Kể cả khi chỉ đẩy listing, supply vẫn phải "neo" edit vào một release
+  #      CÓ SẴN trên track -> app phải có ít nhất một bản trên Play trước
+  #      (bản AAB đầu tiên upload tay qua Play Console). Trước đó lane này fail
+  #      "Could not find release for version code ''".
+  #   2. track phải là track ĐANG có release — bản đầu nằm ở internal nên để
+  #      internal (mặc định của supply là production, chưa có bản nào -> fail).
+  # skip_upload_changelogs: changelog gắn theo versionCode, để lane release
+  # đính kèm lúc upload AAB, không đẩy từ đây.
   desc "Đẩy store listing (fastlane/metadata/android) lên Google Play"
   lane :metadata do
     upload_to_play_store(
       package_name: PACKAGE_NAME,
       json_key_data: ENV.fetch("PLAY_JSON_KEY"),
+      track: "internal",
       skip_upload_aab: true,
       skip_upload_apk: true,
       skip_upload_changelogs: true,

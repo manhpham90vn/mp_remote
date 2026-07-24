@@ -108,6 +108,10 @@ chạy workflow `deploy` một lần (job android sẽ build ra artifact
 hoặc build local có ký bằng cách đặt 4 biến env keystore rồi
 `cd client/android && ./gradlew bundleRelease`.
 
+⚠️ Workflow `metadata` (Android) cũng chỉ chạy được SAU bước upload tay đó:
+supply luôn phải neo edit vào một release có sẵn trên track internal — app
+chưa có bản nào thì fail "Could not find release for version code ''".
+
 ## Bước 4 — Khai GitHub Secrets (environment `stg`)
 
 Secrets nằm trong **environment** `stg` (không phải repository secrets): Repo →
