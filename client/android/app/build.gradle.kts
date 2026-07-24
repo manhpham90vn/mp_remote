@@ -9,16 +9,19 @@ android {
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        // applicationId là danh tính app ngoài chợ/máy; ĐỘC LẬP với `namespace` ở
-        // trên — namespace giữ nguyên com.deskhub.app vì tên hàm JNI
-        // (Java_com_deskhub_app_*) ăn theo package Kotlin, đổi là đứt liên kết .so.
-        applicationId = "com.android.deskhub"
+        // Danh tính + version do FASTLANE quản (nguồn chuẩn: client/android/fastlane/
+        // Appfile và file VERSION ở gốc repo) — release bơm vào qua -PapplicationId/
+        // -PversionName/-PversionCode; giá trị ?: bên dưới chỉ là fallback build tay.
+        // applicationId phải đúng package đã đăng ký Play Console (cấm prefix
+        // com.android./com.google.). ĐỘC LẬP với `namespace`: namespace giữ nguyên
+        // com.deskhub.app vì tên hàm JNI (Java_com_deskhub_app_*) ăn theo nó.
+        applicationId = (project.findProperty("applicationId") as String?) ?: "com.manhpham.deskhub"
         // 24: AMediaCodec NDK có từ 21, nhưng 24 mới đủ ổn định và phủ gần hết máy
         // còn dùng. Khóa "low-latency" chỉ có tác dụng từ 30, máy cũ lờ đi.
         minSdk = 24
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1-phase3"
+        versionCode = (project.findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = (project.findProperty("versionName") as String?) ?: "0.1-dev"
 
         ndk {
             // arm64-v8a: máy thật. x86_64: máy ảo trên PC — không có nó thì emulator
@@ -45,10 +48,25 @@ android {
         }
     }
 
+    // Ký release bằng keystore chỉ định qua env (CI/fastlane đặt — xem
+    // client/android/fastlane/Fastfile). Máy dev không có env thì release để
+    // unsigned như trước; debug luôn ký bằng khoá debug mặc định.
+    if (System.getenv("KEYSTORE_FILE") != null) {
+        signingConfigs {
+            create("release") {
+                storeFile = file(System.getenv("KEYSTORE_FILE"))
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"))
+            signingConfig = signingConfigs.findByName("release")
         }
         debug {
             isJniDebuggable = true

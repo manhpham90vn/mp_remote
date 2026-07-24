@@ -1,0 +1,15 @@
+Deskhub stream màn hình PC Windows sang điện thoại và cho bạn điều khiển với độ trễ cực thấp — sinh ra cho chơi game chứ không chỉ làm việc từ xa.
+
+TÍNH NĂNG
+• Stream video H.264/HEVC, giải mã phần cứng
+• Trackpad ảo: rê ngón tay để di chuột, chạm để click, chạm hai lần cho chuột phải, giữ rồi kéo để bôi chọn
+• Gõ bàn phím đầy đủ, kèm thanh phím tắt Esc, Tab, Enter, mũi tên, Del, Ctrl+C/Ctrl+V
+• Đồng bộ clipboard giữa điện thoại và PC
+• Bitrate thích ứng + sửa lỗi FEC giữ hình mượt khi Wi-Fi chập chờn
+
+CÁCH DÙNG
+Cài Deskhub host (miễn phí) lên PC Windows — tải từ trang dự án — rồi mở app, nhập địa chỉ PC và bấm Connect. Chạy ngay trong mạng LAN; muốn dùng qua Internet thì bật Tailscale trên cả hai máy và kết nối bằng IP Tailscale.
+
+YÊU CẦU
+• PC host chạy Windows 10 1903 trở lên (x64)
+• Hai thiết bị cùng mạng, hoặc nối qua Tailscale

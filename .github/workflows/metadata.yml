@@ -1,0 +1,40 @@
+name: metadata
+
+# Đẩy store listing (description, keywords, changelog... — các file txt trong
+# client/<os>/fastlane/metadata/) lên App Store Connect + Google Play qua
+# deliver/supply. Tách khỏi deploy.yml vì listing có vòng đời riêng: sửa chữ
+# không cần build lại app. Bấm tay khi muốn đồng bộ listing.
+# Secrets dùng chung với deploy.yml (ASC_*, PLAY_JSON_KEY).
+on:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Push App Store listing (fastlane ios metadata)
+        working-directory: client/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+        run: fastlane ios metadata
+
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Ruby + fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+      - run: gem install fastlane --no-document
+
+      - name: Push Play listing (fastlane android metadata)
+        working-directory: client/android
+        env:
+          PLAY_JSON_KEY: ${{ secrets.PLAY_JSON_KEY }}
+        run: fastlane android metadata

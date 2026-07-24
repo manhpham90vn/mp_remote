@@ -1,0 +1,62 @@
+# =============================================================================
+# Fastfile (Android) — build AAB Release đã ký rồi đẩy lên Google Play (track
+# internal). Chạy từ CI (.github/workflows/deploy.yml) hoặc tay:
+#   cd client/android && fastlane android release
+#
+# FASTLANE LÀ NGUỒN CHUẨN của danh tính/version app:
+#   - applicationId            : fastlane/Appfile (package_name)
+#   - versionName (x.y.z)      : file VERSION ở gốc repo (chung với iOS)
+#   - versionCode              : env BUILD_NUMBER (CI truyền github.run_number)
+# Các giá trị này bơm vào gradle qua -P, ĐÈ lên giá trị trong build.gradle.kts —
+# gradle chỉ còn fallback khi build tay (make build-android).
+#
+# Env cần có khi release:
+#   KEYSTORE_FILE / KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD
+#       — keystore ký release (build.gradle.kts đọc trực tiếp từ env này;
+#         thiếu thì gradle rơi về unsigned và Play sẽ từ chối)
+#   PLAY_JSON_KEY — nội dung JSON service account có quyền upload trên Play Console
+# =============================================================================
+default_platform(:android)
+
+PACKAGE_NAME = CredentialsManager::AppfileConfig.try_fetch_value(:package_name)
+APP_VERSION = File.read(File.expand_path("../../../VERSION", __dir__)).strip
+
+platform :android do
+  desc "Build AAB Release (ký bằng keystore từ env) và upload Play internal"
+  lane :release do
+    gradle(
+      task: "bundle",
+      build_type: "Release",
+      properties: {
+        "applicationId" => PACKAGE_NAME,
+        "versionName" => APP_VERSION,
+        "versionCode" => ENV.fetch("BUILD_NUMBER", "1"),
+      }
+    )
+
+    upload_to_play_store(
+      track: "internal",
+      package_name: PACKAGE_NAME,
+      aab: "app/build/outputs/bundle/release/app-release.aab",
+      json_key_data: ENV.fetch("PLAY_JSON_KEY"),
+      skip_upload_metadata: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+
+  # Store listing quản bằng file txt trong fastlane/metadata/android/<locale>/
+  # (supply): title/short_description/full_description.txt + changelogs/. Sửa chữ
+  # = sửa file txt rồi chạy lane này (CI: workflow metadata.yml) — không build lại.
+  desc "Đẩy store listing (fastlane/metadata/android) lên Google Play"
+  lane :metadata do
+    upload_to_play_store(
+      package_name: PACKAGE_NAME,
+      json_key_data: ENV.fetch("PLAY_JSON_KEY"),
+      skip_upload_aab: true,
+      skip_upload_apk: true,
+      skip_upload_images: true,
+      skip_upload_screenshots: true
+    )
+  end
+end

@@ -132,7 +132,7 @@ endif
 # Cần máy thật/emulator đang hiện trong `adb devices`.
 run-android:
 	$(GRADLEW) installDebug
-	"$(ADB)" shell am start -n com.android.deskhub/com.deskhub.app.MainActivity
+	"$(ADB)" shell am start -n com.manhpham.deskhub/com.deskhub.app.MainActivity
 
 # iOS: mở Simulator, đợi boot xong rồi cài + launch bản vừa build.
 ifeq ($(UNAME),Darwin)

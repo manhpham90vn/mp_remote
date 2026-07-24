@@ -1,0 +1,1 @@
+remote desktop,remote control,pc,windows,game streaming,low latency,trackpad,tailscale

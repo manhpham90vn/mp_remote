@@ -1,0 +1,15 @@
+Deskhub streams your Windows PC screen to your phone and lets you control it with ultra-low latency — built for gaming, not just remote work.
+
+FEATURES
+• Live H.264/HEVC video stream with hardware decoding
+• Virtual trackpad: move the mouse by dragging anywhere, tap to click, two-finger tap for right click, hold and drag to select
+• Full keyboard input, plus a hotkey bar for Esc, Tab, Enter, arrows, Del, Ctrl+C/Ctrl+V
+• Clipboard sync between phone and PC
+• Adaptive bitrate and forward error correction keep the stream smooth on shaky Wi-Fi
+
+HOW IT WORKS
+Install the free Deskhub host on your Windows PC (download from the project page), open the app, enter your PC address and connect. Works on your local network out of the box; for remote access over the Internet, pair it with Tailscale and connect via your Tailscale IP.
+
+REQUIREMENTS
+• Windows 10 1903 or later (x64) on the host PC
+• Both devices on the same network, or connected through Tailscale

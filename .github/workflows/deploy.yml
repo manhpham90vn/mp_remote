@@ -1,0 +1,101 @@
+name: deploy
+
+# Đẩy bản phân phối lên hai chợ qua fastlane — iOS lên TestFlight, Android lên
+# Google Play track internal. Chạy khi push tag v* hoặc bấm tay (workflow_dispatch).
+#
+# Danh tính/version app do FASTLANE quản làm nguồn chuẩn duy nhất:
+#   - bundle id iOS + team    : client/ios/fastlane/Appfile
+#   - package Android         : client/android/fastlane/Appfile
+#   - version hiển thị (x.y.z): file VERSION ở gốc repo (chung hai nền tảng)
+#   - build number/versionCode: github.run_number — mỗi lần chạy tự tăng
+#
+# Secrets cần khai (Settings -> Secrets and variables -> Actions):
+#   iOS (App Store Connect > Users and Access > Integrations > API Keys):
+#     ASC_KEY_ID       — Key ID của API key
+#     ASC_ISSUER_ID    — Issuer ID (đầu trang Keys)
+#     ASC_KEY_CONTENT  — nội dung file .p8, base64 một dòng: base64 -i AuthKey_XXX.p8
+#   Android:
+#     ANDROID_KEYSTORE_BASE64 — keystore ký release, base64: base64 -i release.keystore
+#     KEYSTORE_PASSWORD / KEY_ALIAS / KEY_PASSWORD — thông số keystore ở trên
+#     PLAY_JSON_KEY    — nguyên văn JSON service account (Play Console > Setup >
+#                        API access), cấp quyền Release trên app com.manhpham.deskhub
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # iOS -> TestFlight. Runner macOS có sẵn Xcode + fastlane + cmake (script phase
+  # "Build libcore.a (CMake)" của Deskhub.xcodeproj cần cmake). Ký bằng cloud
+  # signing qua API key — không phải cài cert/profile thủ công vào runner.
+  # ---------------------------------------------------------------------------
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fastlane release (build + TestFlight)
+        working-directory: client/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: fastlane ios release
+
+      - name: Upload ipa artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deskhub-ios-ipa
+          path: client/ios/build/*.ipa
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Android -> Play internal. NDK/CMake pin đúng phiên bản build.gradle.kts.
+  # Keystore giải mã ra RUNNER_TEMP (ngoài workspace) rồi truyền đường dẫn qua
+  # env cho gradle (build.gradle.kts đọc KEYSTORE_FILE).
+  # ---------------------------------------------------------------------------
+  android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install NDK + CMake
+        run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
+
+      - name: Setup Ruby + fastlane
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+      - run: gem install fastlane --no-document
+
+      - name: Decode keystore
+        run: echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$RUNNER_TEMP/release.keystore"
+
+      - name: Fastlane release (build + Play internal)
+        working-directory: client/android
+        env:
+          KEYSTORE_FILE: ${{ runner.temp }}/release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          PLAY_JSON_KEY: ${{ secrets.PLAY_JSON_KEY }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: fastlane android release
+
+      - name: Upload aab artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: deskhub-android-aab
+          path: client/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error

@@ -1,0 +1,5 @@
+# Danh tính app trên App Store Connect — khớp PRODUCT_BUNDLE_IDENTIFIER trong
+# Deskhub.xcodeproj và DEVELOPMENT_TEAM. Đăng nhập bằng API key (xem Fastfile),
+# không cần apple_id ở đây.
+app_identifier("com.ios.deskhub")
+team_id("UPJRMYQ38F")

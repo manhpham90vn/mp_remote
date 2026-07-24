@@ -1,0 +1,4 @@
+# Danh tính app trên Google Play — khớp applicationId trong app/build.gradle.kts.
+# Service account JSON truyền qua env PLAY_JSON_KEY (xem Fastfile), không để file
+# key trong repo.
+package_name("com.manhpham.deskhub")

@@ -93,6 +93,7 @@ cho trang).
 | [10-web-client.md](10-web-client.md) | Client Web (WebTransport + WebCodecs, core WASM) — thiết kế |
 | [11-platform-transport.md](11-platform-transport.md) | **Nền tảng & transport: ma trận agent/client, backend theo OS, chiến lược UDP/QUIC** (cross-cutting) |
 | [12-ios-client.md](12-ios-client.md) | Client iOS (SwiftUI + VideoToolbox, core C++) — **đã triển khai** (stream video) |
+| [13-release-mobile.md](13-release-mobile.md) | Phát hành mobile: fastlane + GitHub Actions, hướng dẫn cấu hình secrets/store một lần |
 
 ## Trạng thái
 

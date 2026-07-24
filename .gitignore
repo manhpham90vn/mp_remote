@@ -38,6 +38,11 @@ third_party/*
 # ---- Tool cuc bo (ktlint jar tai theo yeu cau qua scripts/codestyle.ps1) ----
 tools/
 
+# ---- fastlane (client/ios, client/android) ----
+fastlane/report.xml
+fastlane/README.md
+*.p8
+
 # ---- Android (client/android, Gradle + NDK) ----
 .gradle/
 .cxx/
