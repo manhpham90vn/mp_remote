@@ -18,9 +18,10 @@
 //   có thể ra sai phím; chữ cái và chữ số thì luôn đúng.
 //
 // SCANCODE = 0
-//   Không gửi scancode: InputInjector bên host lùi về wVk khi scan = 0 (xem
-//   InputInjector.cpp). Đủ cho việc gõ chữ vào ứng dụng thường; game đọc raw input
-//   cần scancode thật thì dùng đường phím rời (như nút F9) vốn có scan đầy đủ.
+//   Không gửi scancode: InputInjector bên host thấy scan = 0 sẽ TỰ TRA scancode
+//   theo layout bàn phím của host (MapVirtualKey) — bắt buộc cho game đọc Raw
+//   Input/DirectInput, vì engine loại đó chỉ nhìn scancode, wVk suông là vô hình.
+//   Tra ở host đúng hơn tra ở client: scancode phụ thuộc layout của HOST.
 //
 // LIÊN QUAN: deskhub/wire/Wire.h (InputEvent), deskhub/input/InputSender.h,
 //            client/windows/input/InputInjector.cpp (đầu nhận, thứ tự ưu tiên scan/vk)

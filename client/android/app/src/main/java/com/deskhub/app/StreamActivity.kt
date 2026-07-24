@@ -5,8 +5,8 @@
 //   Dựng Surface cho bộ giải mã vẽ vào, khởi động phiên, và điều khiển host:
 //   - Trackpad ảo trên khung video: con trỏ luôn hiện, rê ngón di chuột theo delta,
 //     tap 1 = click trái, tap 2 = click phải, giữ rồi kéo = drag (TrackpadOverlay).
-//   - Nút Keys bật bàn phím ảo, phím gõ chạy sang host (KeyInputView).
-//   - Nút Disconnect kết thúc phiên.
+//   - Thanh đáy: phím tắt Esc/Tab/Enter/F9 (kHotkeys — bàn phím ảo không có những
+//     phím này), nút Keys bật bàn phím ảo (KeyInputView), nút Disconnect.
 //   Nhận địa chỉ host và sourceId qua Intent extra từ MainActivity. Màn hình xoay
 //   theo hướng thiết bị (fullUser trong manifest) — không ép ngang.
 //
@@ -51,17 +51,17 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -195,14 +195,12 @@ private fun StreamScreen(
         }
 
     // Hết phiên thì chạm vào đâu cũng quay lại màn hình nhập địa chỉ.
-    // imePadding: bàn phím ảo đẩy lên thì cả cột co lại phía trên nó — video thu nhỏ
-    // chứ không bị che, thanh nút dưới đáy nổi lên trên bàn phím (nút Keys vẫn với
-    // tới để đóng). Cần adjustResize trong manifest để inset IME được phát xuống.
+    // Bàn phím ảo ĐÈ lên video chứ không co layout (không imePadding/adjustResize)
+    // — người dùng muốn khung hình đứng yên khi mở bàn phím.
     val rootModifier =
         Modifier
             .fillMaxSize()
             .background(Color.Black)
-            .imePadding()
             .let { if (phase == NativeClient.PHASE_ENDED) it.clickable(onClick = onDismiss) else it }
 
     val streaming = phase == NativeClient.PHASE_STREAMING
@@ -242,10 +240,9 @@ private fun StreamScreen(
         }
     }
 
-    // Header cố định bên trên, video chiếm phần còn lại — thay cho overlay đè lên
-    // hình như trước. Chế độ NGANG: trạng thái + cụm nút nằm gọn một hàng trên cùng.
-    // Chế độ DỌC: màn hình hẹp không đủ chỗ cho cả hai — header chỉ còn dòng trạng
-    // thái (cho 2 dòng để hiện hết thông số), cụm nút dời xuống thanh đáy.
+    // Header trên cùng chỉ có dòng trạng thái (chế độ dọc cho 2 dòng để hiện hết
+    // thông số); toàn bộ nút — phím tắt Esc/Tab/Enter/F9, Keys, Disconnect — nằm ở
+    // thanh đáy cho cả hai chiều màn hình, cuộn ngang được khi chật.
     val portrait =
         LocalConfiguration.current.orientation == Configuration.ORIENTATION_PORTRAIT
 
@@ -255,7 +252,7 @@ private fun StreamScreen(
                 Modifier
                     .fillMaxWidth()
                     .background(Color(0xFF161616))
-                    .padding(horizontal = 12.dp, vertical = if (portrait) 8.dp else 2.dp),
+                    .padding(horizontal = 12.dp, vertical = if (portrait) 8.dp else 4.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
@@ -266,14 +263,6 @@ private fun StreamScreen(
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f),
             )
-            if (!portrait) {
-                ControlButtons(
-                    controlsEnabled = streaming,
-                    keyboardOn = keyboardOn,
-                    onToggleKeyboard = { keyboardOn = !keyboardOn },
-                    onDisconnect = onDismiss,
-                )
-            }
         }
 
         Box(
@@ -317,14 +306,17 @@ private fun StreamScreen(
             }
         }
 
-        // Thanh nút dưới đáy — chỉ ở chế độ dọc (xem chú thích trên header).
-        if (portrait) {
+        // Thanh nút dưới đáy — mọi chiều màn hình. Box canh giữa khi thừa chỗ;
+        // Row bên trong cuộn ngang khi thiếu (điện thoại hẹp, chế độ dọc).
+        Box(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF161616)),
+            contentAlignment = Alignment.Center,
+        ) {
             Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF161616)),
-                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 ControlButtons(
@@ -337,6 +329,24 @@ private fun StreamScreen(
         }
     }
 }
+
+/** Một phím tắt gửi thẳng sang host — bàn phím ảo không có những phím này. */
+private data class Hotkey(
+    val label: String,
+    val vk: Int,
+    val scan: Int,
+)
+
+// Esc/Tab/Enter đủ cho thoát menu, chuyển ô, xác nhận; F9 cho phím tắt game.
+// Thêm phím mới = thêm một dòng: mã phím ảo Windows + scancode US (bit8 = cờ E0
+// cho phím mở rộng như mũi tên — xem Wire.h).
+private val kHotkeys =
+    listOf(
+        Hotkey("Esc", 0x1B, 0x01),
+        Hotkey("Tab", 0x09, 0x0F),
+        Hotkey("Enter", 0x0D, 0x1C),
+        Hotkey("F9", 0x78, 0x43),
+    )
 
 /**
  * Trackpad ảo phủ lên khung video, kiểu bàn di chuột laptop: con trỏ LUÔN hiện,
@@ -471,9 +481,10 @@ private fun sendMouseMove(
 }
 
 /**
- * Cụm nút điều khiển phiên: Keys (bật/tắt bàn phím ảo để gõ chữ sang host) và
- * Disconnect. Keys chỉ bấm được khi đang STREAMING vì trước đó kênh input chưa
- * tồn tại. Không tự bọc Row — caller đặt vào header (ngang) hoặc thanh đáy (dọc).
+ * Cụm nút của thanh đáy: phím tắt [kHotkeys] (gõ thẳng phím sang host — bàn phím
+ * ảo không có những phím này), Keys (bật/tắt bàn phím ảo) và Disconnect. Phím tắt
+ * và Keys chỉ bấm được khi đang STREAMING vì trước đó kênh input chưa tồn tại.
+ * Không tự bọc Row — caller lo phần khung + cuộn ngang.
  */
 @Composable
 private fun ControlButtons(
@@ -482,6 +493,14 @@ private fun ControlButtons(
     onToggleKeyboard: () -> Unit,
     onDisconnect: () -> Unit,
 ) {
+    kHotkeys.forEach { hk ->
+        TextButton(
+            onClick = { NativeClient.nativeKeyTap(hk.vk, hk.scan) },
+            enabled = controlsEnabled,
+        ) {
+            Text(hk.label, fontSize = 13.sp)
+        }
+    }
     TextButton(onClick = onToggleKeyboard, enabled = controlsEnabled) {
         Text(
             text = stringResource(R.string.keyboard_button),

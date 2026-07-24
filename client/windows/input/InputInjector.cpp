@@ -160,6 +160,10 @@ void InputInjector::SendKey(int32_t vk, int32_t scan, bool down) {
     INPUT in{};
     in.type = INPUT_KEYBOARD;
     in.ki.dwFlags = down ? 0 : KEYEVENTF_KEYUP;
+    // Client chỉ có VK (bàn phím ảo mobile/web, xem KeyMap.h) -> tự tra scancode
+    // theo layout của host. Bắt buộc cho game: engine đọc Raw Input/DirectInput chỉ
+    // thấy scancode, wVk suông với chúng là vô hình.
+    if (!(scan & 0xFF)) scan = int32_t(MapVirtualKeyW(UINT(vk), MAPVK_VK_TO_VSC));
     if (scan & 0xFF) {
         in.ki.wScan = WORD(scan & 0xFF);
         in.ki.dwFlags |= KEYEVENTF_SCANCODE;

@@ -6,13 +6,29 @@
 // phần chrome. Điều khiển host:
 //   - Trackpad ảo trên khung video: con trỏ luôn hiện, rê ngón di chuột theo delta,
 //     tap 1 = click trái, tap 2 = click phải, giữ rồi kéo = drag (TouchInputView).
-//   - Nút Keys bật bàn phím ảo, phím gõ chạy sang host (KeyInputView).
-//   - Nút Disconnect kết thúc phiên.
+//   - Thanh đáy: phím tắt Esc/Tab/Enter/F9 (kHotkeys — bàn phím ảo không có những
+//     phím này), nút Keys bật bàn phím ảo (KeyInputView), nút Disconnect.
 // Cập nhật mỗi 500ms từ SessionModel. Màn hình xoay theo hướng thiết bị.
 // =============================================================================
 import AVFoundation
 import SwiftUI
 import UIKit
+
+/// Một phím tắt gửi thẳng sang host — bàn phím ảo không có những phím này.
+/// Thêm phím mới = thêm một dòng: mã phím ảo Windows + scancode US (bit8 = cờ E0).
+private struct Hotkey {
+    let label: String
+    let vk: Int32
+    let scan: Int32
+}
+
+// Esc/Tab/Enter đủ cho thoát menu, chuyển ô, xác nhận; F9 cho phím tắt game.
+private let kHotkeys: [Hotkey] = [
+    Hotkey(label: "Esc", vk: 0x1B, scan: 0x01),
+    Hotkey(label: "Tab", vk: 0x09, scan: 0x0F),
+    Hotkey(label: "Enter", vk: 0x0D, scan: 0x1C),
+    Hotkey(label: "F9", vk: 0x78, scan: 0x43),
+]
 
 struct StreamView: View {
     @Bindable var model: SessionModel
@@ -56,12 +72,13 @@ struct StreamView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                if portrait {
-                    bottomBar
-                }
+                bottomBar
             }
         }
         .background(Color.black.ignoresSafeArea())
+        // Không đẩy/nén layout khi bàn phím ảo mở — bàn phím đè lên video, khung
+        // hình đứng yên (người dùng chọn vậy).
+        .ignoresSafeArea(.keyboard)
         .onChange(of: scenePhase) { _, newPhase in
             switch newPhase {
             case .background:
@@ -89,39 +106,48 @@ struct StreamView: View {
         .statusBarHidden()
     }
 
-    // Header cố định bên trên: trạng thái bên trái; ở chế độ ngang kèm cụm nút bên
-    // phải, ở chế độ dọc nút nằm ở bottomBar.
+    // Header cố định bên trên: chỉ dòng trạng thái (chế độ dọc cho 2 dòng để hiện
+    // hết thông số); mọi nút nằm ở bottomBar.
     private func header(portrait: Bool) -> some View {
-        HStack(spacing: 8) {
+        HStack {
             Text(model.statusLine.isEmpty ? "Connecting…" : model.statusLine)
                 .font(.caption.monospaced())
                 .foregroundStyle(.white.opacity(0.8))
                 .lineLimit(portrait ? 2 : 1)
                 .frame(maxWidth: .infinity, alignment: .leading)
-
-            if !portrait {
-                controlButtons
-            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, portrait ? 8 : 6)
         .background(Color(white: 0.09))
     }
 
-    // Thanh nút dưới đáy — chỉ ở chế độ dọc.
+    // Thanh nút dưới đáy — mọi chiều màn hình, cuộn ngang được khi chật.
     private var bottomBar: some View {
-        HStack(spacing: 24) {
-            controlButtons
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 12) {
+                controlButtons
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
         }
         .frame(maxWidth: .infinity)
-        .padding(.vertical, 8)
         .background(Color(white: 0.09))
     }
 
-    // Cụm nút điều khiển phiên: Keys (bật/tắt bàn phím ảo) và Disconnect. Keys chỉ
-    // bấm được khi đang STREAMING vì trước đó kênh input chưa tồn tại.
+    // Cụm nút của thanh đáy: phím tắt kHotkeys (gõ thẳng phím sang host — bàn phím
+    // ảo không có những phím này), Keys (bật/tắt bàn phím ảo) và Disconnect. Phím
+    // tắt và Keys chỉ bấm được khi đang STREAMING vì trước đó kênh input chưa có.
     @ViewBuilder
     private var controlButtons: some View {
+        ForEach(kHotkeys, id: \.label) { hotkey in
+            Button(hotkey.label) { model.keyTap(vk: hotkey.vk, scan: hotkey.scan) }
+                .font(.caption.bold())
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .tint(.white)
+                .disabled(model.phase != .streaming)
+        }
+
         Button("Keys") { keyboardOn.toggle() }
             .font(.caption.bold())
             .buttonStyle(.bordered)

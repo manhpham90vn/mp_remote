@@ -62,13 +62,14 @@ std::string ClientLoop::EndReason() {
     return endReason_;
 }
 
-// Gõ một phím rời: xếp cặp event nhấn + nhả vào hàng đợi cho thread Net vét.
-// Nhấn và nhả đi cùng một lô nên không có nguy cơ kẹt phím do người dùng — phần
-// chống mất gói đã có InputSender gửi lặp lo.
+// Gõ một phím rời: NHẤN đi ngay, NHẢ hẹn sau kTapHoldUs (xem chú thích ở header
+// về lý do game cần phím được giữ thật). Phần chống mất gói đã có InputSender
+// gửi lặp lo; kẹt phím không xảy ra vì cú nhả chắc chắn được vét ở vòng Net sau.
 void ClientLoop::QueueKeyTap(int32_t vk, int32_t scan) {
+    const uint64_t now = NowUs();
     deskhub::InputEvent down;
     down.type = deskhub::InputType::Key;
-    down.timestampUs = NowUs();
+    down.timestampUs = now;
     down.a = vk;
     down.b = scan;
     down.state = 1;
@@ -77,7 +78,7 @@ void ClientLoop::QueueKeyTap(int32_t vk, int32_t scan) {
     {
         std::lock_guard<std::mutex> lk(inputMutex_);
         inputQueue_.push_back(down);
-        inputQueue_.push_back(up);
+        delayedInput_.emplace_back(now + kTapHoldUs, up);
     }
     wantFocus_.store(true, std::memory_order_release);
 }
@@ -123,7 +124,7 @@ void ClientLoop::QueueCharTap(uint32_t codepoint) {
         e.type = deskhub::InputType::Key;
         e.timestampUs = now;
         e.a = vk;
-        e.b = 0; // không có scancode thật — host lùi về wVk (xem KeyMap.h)
+        e.b = 0; // không có scancode thật — host tự tra theo layout của nó (KeyMap.h)
         e.state = down ? 1 : 0;
         return e;
     };
@@ -131,8 +132,11 @@ void ClientLoop::QueueCharTap(uint32_t codepoint) {
         std::lock_guard<std::mutex> lk(inputMutex_);
         if (chord->shift) inputQueue_.push_back(key(deskhub::kVkShift, true));
         inputQueue_.push_back(key(chord->vk, true));
-        inputQueue_.push_back(key(chord->vk, false));
+        // Nhả Shift ngay sau cú nhấn phím chính: ký tự sinh ra tại thời điểm nhấn,
+        // còn giữ Shift qua cả cửa sổ kTapHoldUs thì ký tự KẾ TIẾP (gõ nhanh) bị
+        // dính Shift oan. Riêng phím chính thì nhả trễ — như QueueKeyTap.
         if (chord->shift) inputQueue_.push_back(key(deskhub::kVkShift, false));
+        delayedInput_.emplace_back(now + kTapHoldUs, key(chord->vk, false));
     }
     wantFocus_.store(true, std::memory_order_release);
 }
@@ -530,6 +534,17 @@ void ClientLoop::NetThread() {
             std::vector<deskhub::InputEvent> batch;
             {
                 std::lock_guard<std::mutex> lk(inputMutex_);
+                // Cú nhả phím hẹn giờ (tap giữ kTapHoldUs) tới hạn -> vào lô. Vòng
+                // Net thức dậy tối đa 10ms một lần nên độ trễ nhả sai lệch không quá
+                // 10ms — không ai cảm nhận được.
+                for (auto it = delayedInput_.begin(); it != delayedInput_.end();) {
+                    if (it->first <= now) {
+                        inputQueue_.push_back(it->second);
+                        it = delayedInput_.erase(it);
+                    } else {
+                        ++it;
+                    }
+                }
                 batch.swap(inputQueue_);
             }
             for (const auto& e : batch) session.QueueInput(e);

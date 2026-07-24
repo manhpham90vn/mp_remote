@@ -40,6 +40,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "VtDecoder.h"
@@ -164,8 +165,13 @@ private:
     // giữ vài chục nano giây quanh push/swap, không nằm trên đường nóng của video.
     // wantFocus_: đã từng gửi input thì phải báo host SET_FOCUS — SendInput bên host
     // chỉ tới được cửa sổ đang foreground.
+    // delayedInput_: cú NHẢ phím của tap được hẹn giờ +kTapHoldUs thay vì đi liền
+    // cú nhấn — down/up dính nhau 0ms thì game poll bàn phím theo frame
+    // (GetAsyncKeyState mỗi ~16-33ms) không kịp thấy phím từng được nhấn.
+    static constexpr uint64_t kTapHoldUs = 50'000;
     std::mutex inputMutex_;
     std::vector<deskhub::InputEvent> inputQueue_;
+    std::vector<std::pair<uint64_t, deskhub::InputEvent>> delayedInput_; // (hạn nhả, event)
     std::atomic<bool> wantFocus_{false};
 
     // --- Chẩn đoán (docs/09): t_dec của cửa sổ 1s. Thread Decode ghi, thread Net
