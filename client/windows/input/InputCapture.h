@@ -59,10 +59,9 @@ public:
         return relative_;
     }
 
-    // GD5: cùng đường với phím tắt F9/F10, để nút bấm trên overlay preview gọi
+    // GD5: cùng đường với phím tắt F9, để nút bấm trên overlay preview gọi
     // trực tiếp (không lặp lại logic).
     void ToggleRelativeMode(); // == F9
-    void TogglePause();        // == F10
 
 private:
     void SetRelativeMode(bool on);

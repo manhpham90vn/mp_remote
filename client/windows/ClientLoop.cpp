@@ -790,9 +790,7 @@ int RunClient(const ClientOptions& opt) {
                     if (inputOwner != ps) return;
                     if (id == Renderer::kBtnLock)
                         input.ToggleRelativeMode();
-                    else if (id == Renderer::kBtnPause)
-                        input.TogglePause();
-                    ps->renderer.SetToggleState(input.relativeMode(), !input.enabled());
+                    ps->renderer.SetToggleState(input.relativeMode());
                 });
                 s->rendererReady.store(true, std::memory_order_release);
                 if (!opt.sendInput)

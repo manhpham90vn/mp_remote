@@ -62,7 +62,7 @@ constexpr wchar_t kOverlayClass[] = L"LoopbackOverlayWnd";
 
 // Kích thước dải nút overlay — dùng chung giữa CreateOverlay và SyncOverlayPos.
 constexpr int kBtnW = 130, kBtnH = 24, kBtnPad = 8;
-constexpr int kOverlayW = 2 * kBtnW + kBtnPad;
+constexpr int kOverlayW = kBtnW;
 
 // Thủ tục của child window chứa video. HTTRANSPARENT để mọi cú chuột "xuyên" qua
 // nó rơi về cửa sổ cha — InputCapture móc vào WndProc của cha nên không được để
@@ -76,9 +76,8 @@ LRESULT CALLBACK VideoHostProc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
 struct Renderer::Impl {
     HWND hwnd = nullptr;
     HWND videoHwnd = nullptr;  // child chứa swapchain — xem ghi chú ở Init
-    HWND overlayWnd = nullptr; // popup OWNED chứa 2 nút — xem CreateOverlay
+    HWND overlayWnd = nullptr; // popup OWNED chứa nút Lock — xem CreateOverlay
     HWND btnLock = nullptr;
-    HWND btnPause = nullptr;
     std::wstring baseTitle;        // tiêu đề gốc — SetStatusText ghép số liệu vào sau
     Renderer::CommandHook cmdHook; // GD5: nút overlay -> bên ngoài
     ComPtr<ID3D11Device> device;
@@ -134,13 +133,11 @@ struct Renderer::Impl {
             case WM_MOUSEACTIVATE:
                 return MA_NOACTIVATE;
             case WM_COMMAND:
-                // Nút -> báo ra ngoài, giống hệt đường phím tắt F9/F10. Renderer
+                // Nút -> báo ra ngoài, giống hệt đường phím tắt F9. Renderer
                 // không tự đổi trạng thái nút - bên ngoài gọi lại SetToggleState().
-                if (self && self->cmdHook && HIWORD(wp) == BN_CLICKED) {
-                    const int id = LOWORD(wp);
-                    if (id == Renderer::kBtnLock || id == Renderer::kBtnPause)
-                        self->cmdHook(id);
-                }
+                if (self && self->cmdHook && HIWORD(wp) == BN_CLICKED &&
+                    LOWORD(wp) == Renderer::kBtnLock)
+                    self->cmdHook(Renderer::kBtnLock);
                 return 0;
         }
         return DefWindowProcW(h, msg, wp, lp);
@@ -180,8 +177,6 @@ struct Renderer::Impl {
         };
         btnLock = mkBtn(L"\U0001F512 Lock mouse (F9)", BS_AUTOCHECKBOX | BS_PUSHLIKE,
             0, Renderer::kBtnLock);
-        btnPause = mkBtn(L"⏸ Pause (F10)", BS_AUTOCHECKBOX | BS_PUSHLIKE,
-            kBtnW + kBtnPad, Renderer::kBtnPause);
         SyncOverlayPos();
     }
 
@@ -463,12 +458,10 @@ void Renderer::SetStatusText(const wchar_t* text) {
     SetWindowTextW(impl_->hwnd, t.c_str());
 }
 
-void Renderer::SetToggleState(bool locked, bool paused) {
+void Renderer::SetToggleState(bool locked) {
     if (!impl_) return;
     if (impl_->btnLock)
         SendMessageW(impl_->btnLock, BM_SETCHECK, locked ? BST_CHECKED : BST_UNCHECKED, 0);
-    if (impl_->btnPause)
-        SendMessageW(impl_->btnPause, BM_SETCHECK, paused ? BST_CHECKED : BST_UNCHECKED, 0);
 }
 
 HWND Renderer::Hwnd() const {

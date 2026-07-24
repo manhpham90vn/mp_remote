@@ -17,7 +17,7 @@
 // QUY ƯỚC "TIÊU THỤ" MESSAGE
 //   OnMessage trả true nghĩa là Renderer bỏ qua message đó hoàn toàn. Khi đang bật
 //   gửi input, ta nuốt gần như mọi thứ — kể cả ESC — để người dùng gõ vào MÁY KIA.
-//   Riêng F9/F10 luôn được xử lý tại chỗ vì đó là hai phím thoát hiểm.
+//   Riêng F9 luôn được xử lý tại chỗ vì đó là phím thoát hiểm (thả chuột).
 //
 // LIÊN QUAN: input/InputCapture.h (hai chế độ chuột + lý do), input/InputInjector.cpp
 //            (đầu kia, đối xứng từng bước)
@@ -77,8 +77,7 @@ bool InputCapture::Attach(HWND hwnd, Sink sink) {
     }
     attached_ = true;
     std::printf("[Input] Capturing keyboard + mouse input to send to host.\n");
-    std::printf("[Input]   F9  = lock/release mouse (relative mode for FPS games)\n");
-    std::printf("[Input]   F10 = pause/resume sending input\n");
+    std::printf("[Input]   F9 = lock/release mouse (relative mode for FPS games)\n");
     return true;
 }
 
@@ -107,12 +106,6 @@ void InputCapture::SetEnabled(bool on) {
 
 void InputCapture::ToggleRelativeMode() {
     if (enabled_) SetRelativeMode(!relative_);
-}
-
-void InputCapture::TogglePause() {
-    enabled_ = !enabled_;
-    if (!enabled_) SetRelativeMode(false);
-    std::printf("[Input] %s sending input.\n", enabled_ ? "RESUMED" : "PAUSED");
 }
 
 // Vào/ra chế độ tương đối. Ba việc phải làm cùng lúc khi khoá chuột, và cả ba đều
@@ -192,10 +185,6 @@ void InputCapture::OnRawInput(LPARAM lp) {
         // Phím điều khiển cục bộ: xử lý ở đây, KHÔNG gửi đi.
         if (kb.VKey == kToggleRelativeKey) {
             if (down) ToggleRelativeMode();
-            return;
-        }
-        if (kb.VKey == VK_F10) {
-            if (down) TogglePause();
             return;
         }
 

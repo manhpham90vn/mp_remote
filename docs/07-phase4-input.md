@@ -128,12 +128,12 @@ foreground, thay vì bắn phím mù vào ứng dụng đang mở.
 | Phím | Tác dụng |
 |------|----------|
 | `F9` | khoá/thả chuột (chuyển tuyệt đối ↔ tương đối) |
-| `F10` | tạm dừng/tiếp tục gửi input |
 
-Hai phím này xử lý **cục bộ**, không gửi đi. Khi đang gửi input, client nuốt luôn
+Phím này xử lý **cục bộ**, không gửi đi. Khi đang gửi input, client nuốt luôn
 phím thường (kể cả ESC) để người dùng gõ vào máy kia chứ không đóng cửa sổ preview
-— đóng bằng nút X hoặc F10 rồi ESC. Mất focus khi đang khoá chuột → tự thả, không
-để người dùng kẹt con trỏ.
+— đóng bằng nút X trên thanh tiêu đề. Mất focus khi đang khoá chuột → tự thả,
+không để người dùng kẹt con trỏ. (F10 tạm dừng gửi input từng tồn tại, đã bỏ
+24/07/2026 — pause giữa chừng còn để lại phím đang giữ kẹt ở host.)
 
 **Tổ hợp hệ thống.** Các tổ hợp Windows máy *client* tự xử lý (`Ctrl+Shift+Esc`,
 `Ctrl+Alt+Del`, `Win+L`...) không gửi sang máy host được: máy client chặn lấy

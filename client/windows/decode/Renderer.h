@@ -68,11 +68,10 @@ public:
     using MessageHook = std::function<bool(HWND, UINT, WPARAM, LPARAM)>;
     void SetMessageHook(MessageHook hook);
 
-    // GD5: overlay trên cửa sổ preview - các nút góc trên-phải. Renderer không
-    // biết gì về ngữ nghĩa của từng nút, chỉ báo id nút vừa bấm ra ngoài
-    // (giống SetMessageHook), giống hệt đường phím tắt F9/F10.
-    static constexpr int kBtnLock = 1001;  // == F9 (khóa/thả chuột tương đối)
-    static constexpr int kBtnPause = 1002; // == F10 (tạm dừng/tiếp tục gửi input)
+    // GD5: overlay trên cửa sổ preview - nút góc trên-phải. Renderer không
+    // biết gì về ngữ nghĩa của nút, chỉ báo id nút vừa bấm ra ngoài
+    // (giống SetMessageHook), giống hệt đường phím tắt F9.
+    static constexpr int kBtnLock = 1001; // == F9 (khóa/thả chuột tương đối)
     using CommandHook = std::function<void(int id)>;
     void SetCommandHook(CommandHook hook);
 
@@ -81,9 +80,9 @@ public:
     // về tiêu đề gốc. Chỉ gọi từ luồng đã Init/Pump.
     void SetStatusText(const wchar_t* text);
 
-    // Đồng bộ trạng thái 2 nút với InputCapture khi người dùng đổi bằng phím tắt
-    // thay vì click. Chỉ gọi từ luồng đã Init/Pump.
-    void SetToggleState(bool locked, bool paused);
+    // Đồng bộ trạng thái nút Lock với InputCapture khi người dùng đổi bằng phím
+    // tắt thay vì click. Chỉ gọi từ luồng đã Init/Pump.
+    void SetToggleState(bool locked);
 
     // HWND cửa sổ preview (nullptr nếu chưa Init) - để đăng ký Raw Input.
     HWND Hwnd() const;
