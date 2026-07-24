@@ -1,8 +1,12 @@
 name: build
 
-# Dựng exe Windows + apk Android, đẩy lên artifact. Khi push tag v* thì gom cả hai
-# vào một GitHub Release. Không cần secret nào: apk là bản debug (ký bằng khoá debug
-# nên cài được ngay); muốn bản release đã ký thì thêm keystore + signingConfig sau.
+# Build + test mọi nền tảng, đẩy artifact. Khi push tag v* thì gom exe + apk vào một
+# GitHub Release. Không cần secret nào: apk là bản debug (ký bằng khoá debug nên cài
+# được ngay); muốn bản release đã ký thì thêm keystore + signingConfig sau.
+#
+# Nguyên tắc: nơi nào chạy được thì CI gọi ĐÚNG lệnh dev dùng local (make test-ctest,
+# make build-android, make build-ios) — CI đồng thời là nơi kiểm tra nhánh macOS/Ubuntu
+# của Makefile mà máy dev Windows không tự chạy được.
 on:
   push:
     branches: [main]
@@ -13,28 +17,36 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # Core tests: lõi thuần C++20, offline (không mạng/GPU/submodule) nên build nhanh
-  # bằng gcc trên Ubuntu và chạy qua CTest. Đây là tín hiệu pass/fail ĐỘC LẬP với
-  # bản dựng artifact — chạy trước, thấy đỏ là biết ngay lỗi ở logic lõi chứ không
-  # phải ở toolchain Windows/Android.
+  # Core tests trên Ubuntu (gcc) + macOS (AppleClang): lõi thuần C++20, offline
+  # (không mạng/GPU/submodule). Tín hiệu pass/fail ĐỘC LẬP với bản dựng artifact —
+  # thấy đỏ là lỗi ở logic lõi hoặc tính portable, không phải toolchain đóng gói.
+  # (MSVC được phủ ở job windows bên dưới, cũng chạy CTest.)
   # ---------------------------------------------------------------------------
   core-tests:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4   # không cần submodule: core không đụng nvenc
 
-      - name: Configure core (standalone)
-        run: cmake -S core -B build-core -DCMAKE_BUILD_TYPE=Debug
+      # Preset dùng generator Ninja trên mọi OS.
+      - name: Install Ninja
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            sudo apt-get update -qq && sudo apt-get install -y ninja-build
+          else
+            brew install ninja
+          fi
 
-      - name: Build core_tests
-        run: cmake --build build-core --target core_tests
-
-      - name: Run core tests (CTest, offline)
-        run: ctest --test-dir build-core --output-on-failure
+      - name: Build + run core tests (make test-ctest)
+        run: make test-ctest
 
   # ---------------------------------------------------------------------------
   # Windows: một exe duy nhất (host + client). Build preset Release bằng Ninja +
   # MSVC, chạy lại core_tests trên chính toolchain đó trước khi xuất artifact.
+  # (Không qua make: runner không có GNU make sẵn, và VsDevCmd đã có ilammy lo.)
   # ---------------------------------------------------------------------------
   windows:
     needs: core-tests
@@ -74,9 +86,6 @@ jobs:
   # ---------------------------------------------------------------------------
   android:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: client/android
     steps:
       - uses: actions/checkout@v4
 
@@ -92,10 +101,8 @@ jobs:
       - name: Install NDK + CMake
         run: sdkmanager "ndk;26.1.10909125" "cmake;3.22.1"
 
-      - name: Build debug APK
-        run: |
-          chmod +x ./gradlew
-          ./gradlew assembleDebug --stacktrace
+      - name: Build debug APK (make build-android)
+        run: make build-android
 
       - name: Upload apk
         uses: actions/upload-artifact@v4
@@ -105,8 +112,21 @@ jobs:
           if-no-files-found: error
 
   # ---------------------------------------------------------------------------
-  # Release: chỉ chạy khi push tag v*. Gom artifact của hai job trên rồi đính vào
-  # một GitHub Release. Tên file mang tag để tải về khỏi nhầm phiên bản.
+  # iOS: build check cho Simulator (target `app`, không cần signing) — bắt lỗi
+  # compile Swift/ObjC++/core trên toolchain Xcode. Chưa xuất artifact: bản
+  # Simulator không cài được máy thật, ipa thật cần signing team (để sau).
+  # ---------------------------------------------------------------------------
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build iOS app for Simulator (make build-ios)
+        run: make build-ios
+
+  # ---------------------------------------------------------------------------
+  # Release: chỉ chạy khi push tag v*. Gom artifact của windows + android rồi đính
+  # vào một GitHub Release. Tên file mang tag để tải về khỏi nhầm phiên bản.
   # ---------------------------------------------------------------------------
   release:
     needs: [windows, android]
