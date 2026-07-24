@@ -5,8 +5,8 @@ name: build
 # được ngay); muốn bản release đã ký thì thêm keystore + signingConfig sau.
 #
 # Nguyên tắc: nơi nào chạy được thì CI gọi ĐÚNG lệnh dev dùng local (make test-ctest,
-# make build-android, make build-ios) — CI đồng thời là nơi kiểm tra nhánh macOS/Ubuntu
-# của Makefile mà máy dev Windows không tự chạy được.
+# make coverage, make build-android, make build-ios) — CI đồng thời là nơi kiểm tra
+# nhánh macOS/Ubuntu của Makefile mà máy dev Windows không tự chạy được.
 on:
   push:
     branches: [main]
@@ -42,6 +42,30 @@ jobs:
 
       - name: Build + run core tests (make test-ctest)
         run: make test-ctest
+
+  # ---------------------------------------------------------------------------
+  # Coverage của core: đúng lệnh dev chạy local (make coverage — clang instrument
+  # + llvm-cov, xem Makefile). Chạy trên Ubuntu cho rẻ; toolchain cài giống hệt
+  # bootstrap.sh (clang + llvm). Báo cáo HTML đẩy lên làm artifact để tải về xem;
+  # chưa đặt ngưỡng % bắt buộc — bảng tổng kết in ngay trong log job.
+  # ---------------------------------------------------------------------------
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4   # không cần submodule: core không đụng nvenc
+
+      - name: Install clang + llvm + ninja
+        run: sudo apt-get update -qq && sudo apt-get install -y clang llvm ninja-build
+
+      - name: Build + measure coverage (make coverage)
+        run: make coverage
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: out/coverage
+          if-no-files-found: error
 
   # ---------------------------------------------------------------------------
   # Windows: một exe duy nhất (host + client). Build preset Release bằng Ninja +

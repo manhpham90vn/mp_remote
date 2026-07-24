@@ -3,8 +3,9 @@ bootstrap.ps1 — cài TOÀN BỘ dependency phát triển trên WINDOWS (máy d
 macOS/Ubuntu dùng scripts/bootstrap.sh. Gọi qua `make bootstrap`.
 
 Cài (idempotent — có rồi thì bỏ qua):
-  - Visual Studio 2026 Build Tools: MSVC x64 + CMake/Ninja + LLVM (clang-format)
-  - GNU make, JDK 17 (Temurin), OpenCppCoverage (make coverage)
+  - Visual Studio 2026 Build Tools: MSVC x64 + CMake/Ninja + LLVM
+    (clang-format cho codestyle, clang + llvm-cov cho make coverage)
+  - GNU make, JDK 17 (Temurin)
   - ktlint + swiftformat bản ghim version, tải về tools\ (đã gitignore) cho codestyle.ps1
   - Android SDK/NDK khớp client/android/app/build.gradle.kts (cần sdkmanager sẵn,
     không có thì cài Android Studio và nhắc mở một lần)
@@ -35,13 +36,24 @@ function Install-IfMissing([string]$Cmd, [string]$WingetId, [string]$Label) {
 
 $restartNote = $false
 
-# --- Visual Studio 2026 Build Tools (MSVC x64 + LLVM clang-format) ---------
-# Makefile cần component VC.Tools.x86.x64 (VsDevCmd), codestyle.ps1 cần LLVM trong VS.
+# --- Visual Studio 2026 Build Tools (MSVC x64 + LLVM) ----------------------
+# Makefile cần component VC.Tools.x86.x64 (VsDevCmd); component VC.Llvm.Clang cấp
+# clang-format (codestyle.ps1) lẫn clang++/llvm-cov/llvm-profdata (make coverage).
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsOk = $false
 if (Test-Path $vswhere) {
     $vs = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-    if ($vs) { $vsOk = $true; Write-Host "[ok]      Visual Studio C++ toolchain ($vs)" }
+    if ($vs) {
+        $vsOk = $true; Write-Host "[ok]      Visual Studio C++ toolchain ($vs)"
+        # VS cài tay có thể thiếu component LLVM — make lint (clang-format) lẫn
+        # make coverage (clang++/llvm-cov) đều cần nó, kiểm tra và nhắc rõ.
+        if (Test-Path (Join-Path $vs 'VC\Tools\Llvm\x64\bin\clang++.exe')) {
+            Write-Host "[ok]      LLVM in VS (clang-format + clang++/llvm-cov)"
+        } else {
+            Write-Host "[action]  VS is missing the LLVM component (needed by 'make lint' + 'make coverage')."
+            Write-Host "          Open Visual Studio Installer -> Modify -> add 'C++ Clang tools for Windows'."
+        }
+    }
 }
 if (-not $vsOk) {
     Write-Host "[install] Visual Studio 2026 Build Tools (C++ workload + Clang)..."
@@ -51,26 +63,10 @@ if (-not $vsOk) {
     $restartNote = $true
 }
 
-# --- GNU make + JDK 17 + OpenCppCoverage -----------------------------------
-# make: chạy Makefile. JDK 17: gradle (Android) + ktlint. OpenCppCoverage: make coverage.
+# --- GNU make + JDK 17 -------------------------------------------------------
+# make: chạy Makefile. JDK 17: gradle (Android) + ktlint.
 if (Install-IfMissing 'make' 'GnuWin32.Make' 'GNU make') { $restartNote = $true }
 if (Install-IfMissing 'java' 'EclipseAdoptium.Temurin.17.JDK' 'JDK 17 (Temurin)') { $restartNote = $true }
-if (Install-IfMissing 'OpenCppCoverage' 'OpenCppCoverage.OpenCppCoverage' 'OpenCppCoverage') { $restartNote = $true }
-
-# MSI của OpenCppCoverage khi cài silent qua winget KHÔNG ghi PATH — tự thêm vào
-# user PATH (persistent) nếu thiếu, để terminal mới gọi thẳng được OpenCppCoverage.
-$occDir = 'C:\Program Files\OpenCppCoverage'
-if ((Test-Path (Join-Path $occDir 'OpenCppCoverage.exe')) -and
-    -not (Get-Command OpenCppCoverage -ErrorAction SilentlyContinue)) {
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (($userPath -split ';') -notcontains $occDir) {
-        Write-Host "[path]    OpenCppCoverage -> user PATH ($occDir)"
-        [Environment]::SetEnvironmentVariable('Path', ($userPath.TrimEnd(';') + ';' + $occDir), 'User')
-        $restartNote = $true
-    }
-    # Cho phần còn lại của script này thấy được tool ngay, khỏi đợi terminal mới.
-    $env:Path += ';' + $occDir
-}
 
 # --- ktlint + swiftformat (bản ghim, về tools\) -----------------------------
 # codestyle.ps1 chỉ DÙNG tool, không tải — mọi thứ cài đặt gom về đây.

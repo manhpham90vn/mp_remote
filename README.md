@@ -81,9 +81,9 @@ docs/            tài liệu thiết kế (bắt đầu từ docs/README.md)
 - GPU NVIDIA khuyến nghị (NVENC); không có thì tự rơi về Media Foundation.
 
 Cài toàn bộ dependency tự động (idempotent), mọi OS: `make bootstrap` — gồm cả Android
-SDK/NDK, tool format (ktlint/swiftformat ghim version về `tools/`) và OpenCppCoverage
-(Windows). Makefile chạy được trên cả Windows/macOS/Ubuntu; trên macOS/Ubuntu hiện build
-được `core` + `make test`/`make lint` (client desktop chưa có).
+SDK/NDK và tool format (ktlint/swiftformat ghim version về `tools/`). Makefile chạy được
+trên cả Windows/macOS/Ubuntu; trên macOS/Ubuntu hiện build được `core` + `make test`/
+`make lint`/`make coverage` (client desktop chưa có).
 
 ## 🚀 Tải & chạy
 

@@ -15,7 +15,7 @@
 #   make run-ios        build + cài + mở app iOS trên Simulator (cần macOS + Xcode)
 #   make test         build core_tests rồi chạy (offline, không cần client/GPU)
 #   make test-ctest   chạy qua CTest (--output-on-failure) — khớp cách CI chạy
-#   make coverage     đo phủ core (mới có trên Windows — OpenCppCoverage)
+#   make coverage     đo phủ core (clang + llvm-cov — chạy trên cả Windows/macOS/Ubuntu)
 #
 # Format/lint — cả 3 ngôn ngữ hoặc rõ từng ngôn ngữ:
 #   make format         áp format tại chỗ cho cả C++ + Kotlin + Swift
@@ -42,6 +42,13 @@ CHECKFLAG  := -Check
 ONLYFLAG   := -Only
 CORE_TESTS := out\build\x64-debug\core\core_tests.exe
 NULDEV     := nul
+# LLVM đi kèm VS (component VC.Llvm.Clang — bootstrap cài): clang++ + llvm-cov/profdata.
+# VsDevCmd không tự thêm thư mục này vào PATH nên coverage tự prepend.
+LLVMPATH   := set "PATH=$(VSDIR)\VC\Tools\Llvm\x64\bin;%PATH%" &&
+LLVM       :=
+COV_TESTS  := out\build\coverage\core\core_tests.exe
+COV_RAW    := out\build\coverage\core_tests.profraw
+COV_DATA   := out\build\coverage\core_tests.profdata
 GRADLEW    := cd client\android && .\gradlew.bat
 ADB        := $(if $(ANDROID_HOME),$(ANDROID_HOME)\platform-tools\adb.exe,$(LOCALAPPDATA)\Android\Sdk\platform-tools\adb.exe)
 else
@@ -54,6 +61,13 @@ CHECKFLAG  := --check
 ONLYFLAG   := --only
 CORE_TESTS := out/build/x64-debug/core/core_tests
 NULDEV     := /dev/null
+# macOS: llvm-cov/llvm-profdata nằm trong toolchain Xcode, gọi qua xcrun.
+# Ubuntu: gói llvm cài thẳng vào PATH (bootstrap.sh cài clang + llvm).
+LLVMPATH   :=
+LLVM       := $(if $(filter Darwin,$(UNAME)),xcrun)
+COV_TESTS  := out/build/coverage/core/core_tests
+COV_RAW    := out/build/coverage/core_tests.profraw
+COV_DATA   := out/build/coverage/core_tests.profdata
 GRADLEW    := cd client/android && ./gradlew
 ADB        := $(if $(ANDROID_HOME),$(ANDROID_HOME)/platform-tools/adb,adb)
 endif
@@ -145,18 +159,28 @@ test-ctest:
 	@$(DEVCMD) cmake --preset x64-debug >$(NULDEV) && cmake --build --preset x64-debug --target core_tests
 	@$(DEVCMD) ctest --test-dir out/build/x64-debug --output-on-failure
 
-# Đo phủ code của lõi — Windows-only vì dùng OpenCppCoverage (bootstrap cài sẵn).
-# Dùng bản Debug (có PDB); chỉ tính core/src + core/include, bỏ code test khỏi mẫu số.
+# Đo phủ code của lõi — cùng một cách trên cả 3 OS: build cây riêng preset
+# `coverage` bằng clang (instrument -fprofile-instr-generate/-fcoverage-mapping),
+# chạy core_tests sinh .profraw rồi xuất báo cáo qua llvm-profdata + llvm-cov.
+# Nguồn tool: Windows = LLVM kèm VS (VC.Llvm.Clang), macOS = Xcode (xcrun),
+# Ubuntu = gói clang + llvm. Chỉ tính core/src + core/include (positional filter
+# của llvm-cov) nên code test tự động nằm ngoài mẫu số.
 ifeq ($(OS),Windows_NT)
-# MSI của OpenCppCoverage cài silent qua winget KHÔNG ghi PATH — tự thêm vào PATH
-# của recipe để chạy được ngay cả khi session/PATH chưa có.
 coverage:
-	@$(DEVCMD) cmake --preset x64-debug >$(NULDEV) && cmake --build --preset x64-debug --target core_tests
-	set "PATH=%PATH%;C:\Program Files\OpenCppCoverage" && OpenCppCoverage --sources core\src --sources core\include --excluded_sources core\tests --export_type html:out\coverage -- out\build\x64-debug\core\core_tests.exe
+	@$(DEVCMD) $(LLVMPATH) cmake --preset coverage >$(NULDEV) && cmake --build --preset coverage --target core_tests
+	@$(DEVCMD) set "LLVM_PROFILE_FILE=$(COV_RAW)" && $(COV_TESTS)
+	@$(DEVCMD) $(LLVMPATH) llvm-profdata merge -sparse $(COV_RAW) -o $(COV_DATA)
+	@$(DEVCMD) $(LLVMPATH) llvm-cov show $(COV_TESTS) -instr-profile=$(COV_DATA) -format=html -output-dir=out\coverage core\src core\include
+	@$(DEVCMD) $(LLVMPATH) llvm-cov report $(COV_TESTS) -instr-profile=$(COV_DATA) core\src core\include
 	@echo Report: out\coverage\index.html
 else
 coverage:
-	@echo "make coverage: Windows-only for now (OpenCppCoverage)"; exit 1
+	@cmake --preset coverage >$(NULDEV) && cmake --build --preset coverage --target core_tests
+	LLVM_PROFILE_FILE=$(COV_RAW) $(COV_TESTS)
+	@$(LLVM) llvm-profdata merge -sparse $(COV_RAW) -o $(COV_DATA)
+	@$(LLVM) llvm-cov show $(COV_TESTS) -instr-profile=$(COV_DATA) -format=html -output-dir=out/coverage core/src core/include
+	@$(LLVM) llvm-cov report $(COV_TESTS) -instr-profile=$(COV_DATA) core/src core/include
+	@echo "Report: out/coverage/index.html"
 endif
 
 # Format/lint mỗi OS một script cùng hành vi: Windows codestyle.ps1, Unix codestyle.sh.

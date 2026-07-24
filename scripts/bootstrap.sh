@@ -6,7 +6,8 @@
 # Cài (idempotent — có rồi thì bỏ qua):
 #   macOS : Xcode (chỉ kiểm tra, không tự cài được) + brew: cmake ninja swiftlint
 #           pipx + JDK 17 (Temurin)
-#   Ubuntu: apt: toolchain C++ + cmake ninja + JDK 17 + pipx + unzip curl
+#   Ubuntu: apt: toolchain C++ + clang/llvm (make coverage) + cmake ninja + JDK 17
+#           + pipx + unzip curl
 #   Cả hai: clang-format ghim version qua pipx (khớp CI + VS LLVM bên Windows),
 #           ktlint + swiftformat bản ghim tải về tools/ (đã gitignore) cho codestyle.sh,
 #           Android SDK/NDK khớp client/android/app/build.gradle.kts (cần sdkmanager).
@@ -118,9 +119,10 @@ Linux)
     have apt-get || { echo "Only Ubuntu/Debian (apt) is supported for now." >&2; exit 1; }
 
     # --- apt: toolchain C++ + JDK 17 (gradle/ktlint) + tiện ích -------------
-    echo "[install] apt packages (build-essential cmake ninja openjdk-17 pipx unzip curl)..."
+    # clang + llvm: make coverage (clang++ instrument + llvm-profdata/llvm-cov).
+    echo "[install] apt packages (build-essential clang llvm cmake ninja openjdk-17 pipx unzip curl)..."
     sudo apt-get update -qq
-    sudo apt-get install -y build-essential cmake ninja-build openjdk-17-jdk-headless pipx unzip curl
+    sudo apt-get install -y build-essential clang llvm cmake ninja-build openjdk-17-jdk-headless pipx unzip curl
 
     install_clang_format
     install_format_tools
