@@ -79,10 +79,12 @@ chạy workflow `deploy` một lần (job android sẽ build ra artifact
 hoặc build local có ký bằng cách đặt 4 biến env keystore rồi
 `cd client/android && ./gradlew bundleRelease`.
 
-## Bước 4 — Khai GitHub Secrets
+## Bước 4 — Khai GitHub Secrets (environment `stg`)
 
-Repo → **Settings** → **Secrets and variables** → **Actions** → New repository
-secret:
+Secrets nằm trong **environment** `stg` (không phải repository secrets): Repo →
+**Settings** → **Environments** → **stg** → Environment secrets → Add secret.
+Các job trong deploy.yml/metadata.yml đã khai `environment: stg` để đọc chúng —
+đổi tên environment thì phải sửa cả hai workflow.
 
 | Secret | Giá trị |
 |---|---|

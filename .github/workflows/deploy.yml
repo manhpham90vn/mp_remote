@@ -9,7 +9,8 @@ name: deploy
 #   - version hiển thị (x.y.z): file VERSION ở gốc repo (chung hai nền tảng)
 #   - build number/versionCode: github.run_number — mỗi lần chạy tự tăng
 #
-# Secrets cần khai (Settings -> Secrets and variables -> Actions):
+# Secrets khai trong ENVIRONMENT `stg` (Settings -> Environments -> stg) — job
+# nào cần secret phải khai `environment: stg` mới đọc được:
 #   iOS (App Store Connect > Users and Access > Integrations > API Keys):
 #     ASC_KEY_ID       — Key ID của API key
 #     ASC_ISSUER_ID    — Issuer ID (đầu trang Keys)
@@ -32,6 +33,7 @@ jobs:
   # ---------------------------------------------------------------------------
   ios:
     runs-on: macos-latest
+    environment: stg
     steps:
       - uses: actions/checkout@v4
 
@@ -58,6 +60,7 @@ jobs:
   # ---------------------------------------------------------------------------
   android:
     runs-on: ubuntu-latest
+    environment: stg
     steps:
       - uses: actions/checkout@v4
 
