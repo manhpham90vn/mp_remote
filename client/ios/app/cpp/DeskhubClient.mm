@@ -94,6 +94,26 @@ void dh_set_layer(void* layer) {
     if (cl) cl->SetLayer(layer);
 }
 
+void dh_key_tap(int32_t vk, int32_t scan) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (g_client) g_client->QueueKeyTap(vk, scan);
+}
+
+void dh_mouse_move(int32_t nx, int32_t ny) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (g_client) g_client->QueueMouseMoveAbs(nx, ny);
+}
+
+void dh_mouse_button(int32_t button, bool down) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (g_client) g_client->QueueMouseButton(button, down);
+}
+
+void dh_char_tap(uint32_t codepoint) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (g_client) g_client->QueueCharTap(codepoint);
+}
+
 DHPhase dh_phase(void) {
     std::lock_guard<std::mutex> lk(g_mutex);
     if (!g_client) return DHPhaseIdle;

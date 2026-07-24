@@ -18,6 +18,7 @@ final class SessionModel {
     var screen: AppScreen = .connect
     var address: String = UserDefaults.standard.string(forKey: "lastAddress") ?? ""
     var isConnecting = false
+    var phase: Phase = .idle
     var statusLine = ""
     var endReason = ""
     var videoWidth: UInt32 = 0
@@ -57,6 +58,7 @@ final class SessionModel {
         selectedSourceId = sourceId
         endReason = ""
         statusLine = ""
+        phase = .connecting
         DeskhubClient.start(address: address, sourceId: sourceId)
         screen = .stream
         startPolling()
@@ -66,7 +68,23 @@ final class SessionModel {
     func disconnect() {
         stopPolling()
         DeskhubClient.stop()
+        phase = .idle
         screen = .connect
+    }
+
+    // --- Điều khiển từ touch/bàn phím ảo (StreamView + TouchInputView/KeyInputView).
+    // Chỉ chuyển tiếp xuống facade; tầng C++ tự bỏ qua khi chưa STREAMING. ---
+
+    func mouseMove(nx: Int32, ny: Int32) {
+        DeskhubClient.mouseMove(nx: nx, ny: ny)
+    }
+
+    func mouseButton(_ button: MouseButton, down: Bool) {
+        DeskhubClient.mouseButton(button, down: down)
+    }
+
+    func charTap(_ codepoint: UInt32) {
+        DeskhubClient.charTap(codepoint)
     }
 
     // UI cần gọi khi StreamView xuất hiện/biến mất.
@@ -93,7 +111,7 @@ final class SessionModel {
     }
 
     private func poll() {
-        let phase = DeskhubClient.phase()
+        phase = DeskhubClient.phase()
         statusLine = DeskhubClient.statusLine()
         videoWidth = DeskhubClient.videoWidth()
         videoHeight = DeskhubClient.videoHeight()

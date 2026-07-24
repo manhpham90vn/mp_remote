@@ -60,6 +60,20 @@ void dh_stop(void);
 // thread Decode xác nhận đã buông layer cũ.
 void dh_set_layer(void* layer);
 
+// Gõ một phím rời (nhấn + nhả) sang host — nút F9 trên header màn hình xem.
+// `vk` là mã phím ảo Windows, `scan` là scancode (bit8 = cờ E0, xem Wire.h).
+// Chỉ có tác dụng khi phiên đang STREAMING.
+void dh_key_tap(int32_t vk, int32_t scan);
+
+// Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video.
+void dh_mouse_move(int32_t nx, int32_t ny);
+
+// Nhấn/nhả nút chuột (1 = trái, 2 = phải) tại vị trí con trỏ hiện hành.
+void dh_mouse_button(int32_t button, bool down);
+
+// Gõ một ký tự từ bàn phím ảo (KeyMap của core quy đổi sang VK, layout US).
+void dh_char_tap(uint32_t codepoint);
+
 // Trạng thái phiên hiện tại.
 DHPhase dh_phase(void);
 

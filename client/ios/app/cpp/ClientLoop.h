@@ -5,9 +5,11 @@
 //
 // NHIỆM VỤ
 //   Nối bốn thứ thành một phiên chạy được: socket UDP, máy trạng thái ClientSession
-//   của core, bộ ghép mảnh Reassembler, và bộ giải mã VtDecoder. View-only (GĐ3):
-//   CHƯA gửi input. Nguồn muốn xem do caller chọn sẵn qua QuerySources() rồi truyền
-//   vào Start().
+//   của core, bộ ghép mảnh Reassembler, và bộ giải mã VtDecoder. Kênh input phục vụ
+//   điều khiển từ màn hình cảm ứng: chuột tuyệt đối (touch trên khung video), nút
+//   chuột, phím rời (nút F9) và ký tự từ bàn phím ảo (QueueCharTap + KeyMap). Không
+//   có chế độ chuột tương đối (F9-lock của Windows) — màn hình cảm ứng không có
+//   delta chuột thô. Nguồn muốn xem do caller chọn sẵn qua QuerySources().
 //
 // BA THREAD, VÀ LÝ DO CÓ TỪNG CÁI
 //   Main (main thread của app) — giao/thu hồi layer, hỏi trạng thái để vẽ overlay.
@@ -38,11 +40,13 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "VtDecoder.h"
 #include "net/UdpSocket.h"
 
 #include "deskhub/transport/Reassembler.h"
+#include "deskhub/wire/Wire.h"
 
 class ClientLoop {
 public:
@@ -83,6 +87,27 @@ public:
 
     // Lý do phiên kết thúc, để UI báo cho người dùng thay vì im lặng.
     std::string EndReason();
+
+    // --- Kênh input (touch + bàn phím ảo). Tất cả gọi từ UI thread; thread Net vét
+    // hàng đợi mỗi vòng rồi giao ClientSession đánh seq và gửi lặp chống kẹt phím
+    // (InputSender). Chỉ có tác dụng khi phiên đang STREAMING. ---
+
+    // Gõ một phím rời (nhấn rồi nhả ngay) sang host — phục vụ nút F9 trên header.
+    // `vk` là mã phím ảo Windows, `scan` là scancode (bit8 = cờ E0, xem Wire.h).
+    void QueueKeyTap(int32_t vk, int32_t scan);
+
+    // Chuột tuyệt đối từ màn hình cảm ứng: `nx`/`ny` chuẩn hoá 0..65535 trong khung
+    // video — cùng hệ toạ độ với InputCapture bên Windows, host map lên khung hình
+    // đã capture. Caller tự chuẩn hoá theo rect của view video; ở đây chỉ kẹp biên.
+    void QueueMouseMoveAbs(int32_t nx, int32_t ny);
+
+    // Nhấn/nhả một nút chuột tại vị trí con trỏ hiện hành. `button` theo
+    // deskhub::MouseButton (1 = trái, 2 = phải).
+    void QueueMouseButton(int32_t button, bool down);
+
+    // Gõ một KÝ TỰ từ bàn phím ảo: KeyMap (layout US) đổi thành chuỗi
+    // [Shift↓] key↓ key↑ [Shift↑]. Ký tự không quy đổi được thì lặng lẽ bỏ qua.
+    void QueueCharTap(uint32_t codepoint);
 
     // Kích thước video đàm phán được — UI dùng để đặt đúng tỉ lệ khung.
     uint32_t videoWidth() const {
@@ -134,6 +159,14 @@ private:
     std::atomic<bool> decodeFailed_{false};
     std::atomic<bool> queueOverflow_{false};
     std::atomic<uint32_t> stRendered_{0};
+
+    // Input UI thread gom -> thread Net vét (cùng mô hình client Windows). Khóa chỉ
+    // giữ vài chục nano giây quanh push/swap, không nằm trên đường nóng của video.
+    // wantFocus_: đã từng gửi input thì phải báo host SET_FOCUS — SendInput bên host
+    // chỉ tới được cửa sổ đang foreground.
+    std::mutex inputMutex_;
+    std::vector<deskhub::InputEvent> inputQueue_;
+    std::atomic<bool> wantFocus_{false};
 
     // --- Chẩn đoán (docs/09): t_dec của cửa sổ 1s. Thread Decode ghi, thread Net
     // đọc-và-reset. ---

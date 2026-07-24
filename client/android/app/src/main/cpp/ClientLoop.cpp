@@ -44,6 +44,7 @@
 #include "deskhubp/Clock.h"
 
 #include "deskhub/control/LinkStats.h"
+#include "deskhub/input/KeyMap.h"
 #include "deskhub/session/ClientSession.h"
 #include "deskhub/wire/Wire.h"
 
@@ -59,6 +60,81 @@ std::string ClientLoop::StatusLine() {
 std::string ClientLoop::EndReason() {
     std::lock_guard<std::mutex> lk(textMutex_);
     return endReason_;
+}
+
+// Gõ một phím rời: xếp cặp event nhấn + nhả vào hàng đợi cho thread Net vét.
+// Nhấn và nhả đi cùng một lô nên không có nguy cơ kẹt phím do người dùng — phần
+// chống mất gói đã có InputSender gửi lặp lo.
+void ClientLoop::QueueKeyTap(int32_t vk, int32_t scan) {
+    deskhub::InputEvent down;
+    down.type = deskhub::InputType::Key;
+    down.timestampUs = NowUs();
+    down.a = vk;
+    down.b = scan;
+    down.state = 1;
+    deskhub::InputEvent up = down;
+    up.state = 0;
+    {
+        std::lock_guard<std::mutex> lk(inputMutex_);
+        inputQueue_.push_back(down);
+        inputQueue_.push_back(up);
+    }
+    wantFocus_.store(true, std::memory_order_release);
+}
+
+// Chuột tuyệt đối: kẹp biên rồi xếp hàng. Move không phải state event nên mất gói
+// cũng vô hại — event kế tiếp thay thế.
+void ClientLoop::QueueMouseMoveAbs(int32_t nx, int32_t ny) {
+    auto clamp = [](int32_t v) { return v < 0 ? 0 : (v > 65535 ? 65535 : v); };
+    deskhub::InputEvent e;
+    e.type = deskhub::InputType::MouseMove;
+    e.timestampUs = NowUs();
+    e.a = clamp(nx);
+    e.b = clamp(ny);
+    e.absolute = 1;
+    {
+        std::lock_guard<std::mutex> lk(inputMutex_);
+        inputQueue_.push_back(e);
+    }
+    wantFocus_.store(true, std::memory_order_release);
+}
+
+void ClientLoop::QueueMouseButton(int32_t button, bool down) {
+    deskhub::InputEvent e;
+    e.type = deskhub::InputType::MouseButton;
+    e.timestampUs = NowUs();
+    e.a = button;
+    e.state = down ? 1 : 0;
+    {
+        std::lock_guard<std::mutex> lk(inputMutex_);
+        inputQueue_.push_back(e);
+    }
+    wantFocus_.store(true, std::memory_order_release);
+}
+
+// Gõ một ký tự từ bàn phím ảo. Cả cụm [Shift↓] key↓ key↑ [Shift↑] vào hàng đợi
+// trong MỘT lần giữ khóa để không bị event khác chen ngang giữa Shift↓ và Shift↑.
+void ClientLoop::QueueCharTap(uint32_t codepoint) {
+    const auto chord = deskhub::CharToKeyChord(codepoint);
+    if (!chord) return; // ký tự ngoài bảng US-ASCII — không gõ được, bỏ qua
+    const uint64_t now = NowUs();
+    auto key = [now](int32_t vk, bool down) {
+        deskhub::InputEvent e;
+        e.type = deskhub::InputType::Key;
+        e.timestampUs = now;
+        e.a = vk;
+        e.b = 0; // không có scancode thật — host lùi về wVk (xem KeyMap.h)
+        e.state = down ? 1 : 0;
+        return e;
+    };
+    {
+        std::lock_guard<std::mutex> lk(inputMutex_);
+        if (chord->shift) inputQueue_.push_back(key(deskhub::kVkShift, true));
+        inputQueue_.push_back(key(chord->vk, true));
+        inputQueue_.push_back(key(chord->vk, false));
+        if (chord->shift) inputQueue_.push_back(key(deskhub::kVkShift, false));
+    }
+    wantFocus_.store(true, std::memory_order_release);
 }
 
 bool ClientLoop::Start(const NetAddr& server, uint8_t sourceId) {
@@ -446,6 +522,19 @@ void ClientLoop::NetThread() {
                 nackFrame, nackIdx);
             if (nn) session.SendNack(nackFrame, std::span<const uint16_t>(nackIdx, nn));
         }
+
+        // Vét input do UI thread gom -> ClientSession đánh seq, Tick gửi. Đã từng có
+        // input thì báo SET_FOCUS để host kéo cửa sổ nguồn lên foreground (SetFocused
+        // tự lọc trùng nên gọi mỗi vòng là vô hại).
+        {
+            std::vector<deskhub::InputEvent> batch;
+            {
+                std::lock_guard<std::mutex> lk(inputMutex_);
+                batch.swap(inputQueue_);
+            }
+            for (const auto& e : batch) session.QueueInput(e);
+        }
+        if (wantFocus_.load(std::memory_order_acquire)) session.SetFocused(true);
 
         session.Tick(now);
         if (session.state() == deskhub::ClientSession::State::Dead) break;

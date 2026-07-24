@@ -7,6 +7,7 @@
 
 #include "deskhub/input/InputReceiver.h"
 #include "deskhub/input/InputSender.h"
+#include "deskhub/input/KeyMap.h"
 
 #include <cstdio>
 #include <vector>
@@ -223,6 +224,32 @@ void TestInputReset() {
         "receiver reset forgets the seq history");
 }
 
+// Bảng ký tự -> tổ hợp phím (layout US) cho bàn phím ảo mobile/web: chữ thường/hoa,
+// ký hiệu cần Shift, phím điều khiển, và ký tự ngoài bảng phải trả nullopt.
+void TestCharToKeyChord() {
+    std::printf("[input] KeyMap: char -> VK chord (US layout)...\n");
+
+    auto chord = [](uint32_t cp) { return CharToKeyChord(cp); };
+
+    Check(chord('a') && chord('a')->vk == 'A' && !chord('a')->shift, "'a' -> VK 'A' no shift");
+    Check(chord('Z') && chord('Z')->vk == 'Z' && chord('Z')->shift, "'Z' -> VK 'Z' + shift");
+    Check(chord('7') && chord('7')->vk == '7' && !chord('7')->shift, "digit maps to itself");
+    Check(chord('!') && chord('!')->vk == '1' && chord('!')->shift, "'!' -> shift + '1'");
+    Check(chord('?') && chord('?')->vk == 0xBF && chord('?')->shift, "'?' -> shift + VK_OEM_2");
+    Check(chord('"') && chord('"')->vk == 0xDE && chord('"')->shift, "quote -> shift + VK_OEM_7");
+    Check(chord(' ') && chord(' ')->vk == kVkSpace, "space -> VK_SPACE");
+    Check(chord('\n') && chord('\n')->vk == kVkReturn, "newline -> VK_RETURN");
+    Check(chord('\r') && chord('\r')->vk == kVkReturn, "CR -> VK_RETURN");
+    Check(chord('\b') && chord('\b')->vk == kVkBack, "backspace -> VK_BACK");
+    Check(chord('\t') && chord('\t')->vk == kVkTab, "tab -> VK_TAB");
+    Check(!chord(0x1B), "bare ESC control char is not typeable");
+    Check(!chord(0x1EA1 /* 'ạ' */), "non-ASCII has no chord");
+
+    // Mọi ký tự ASCII in được phải có chord — bàn phím ảo gõ gì cũng không rơi rụng.
+    for (uint32_t cp = 0x20; cp < 0x7F; ++cp)
+        Check(chord(cp).has_value(), "every printable ASCII char has a chord");
+}
+
 } // namespace
 
 void RunInputTests() {
@@ -232,4 +259,5 @@ void RunInputTests() {
     TestInputLossCounted();
     TestInputMultiBatchAndTrim();
     TestInputReset();
+    TestCharToKeyChord();
 }

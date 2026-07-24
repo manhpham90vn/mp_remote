@@ -9,7 +9,10 @@ android {
     ndkVersion = "26.1.10909125"
 
     defaultConfig {
-        applicationId = "com.deskhub.app"
+        // applicationId là danh tính app ngoài chợ/máy; ĐỘC LẬP với `namespace` ở
+        // trên — namespace giữ nguyên com.deskhub.app vì tên hàm JNI
+        // (Java_com_deskhub_app_*) ăn theo package Kotlin, đổi là đứt liên kết .so.
+        applicationId = "com.android.deskhub"
         // 24: AMediaCodec NDK có từ 21, nhưng 24 mới đủ ổn định và phủ gần hết máy
         // còn dùng. Khóa "low-latency" chỉ có tác dụng từ 30, máy cũ lờ đi.
         minSdk = 24

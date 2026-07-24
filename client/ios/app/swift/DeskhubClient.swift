@@ -14,6 +14,12 @@ nonisolated enum Phase: Int, Sendable {
     case ended = 3
 }
 
+// Nút chuột theo deskhub::MouseButton (Wire.h).
+nonisolated enum MouseButton: Int32, Sendable {
+    case left = 1
+    case right = 2
+}
+
 struct Source: Identifiable, Sendable {
     let id: UInt8
     let width: UInt16
@@ -51,6 +57,26 @@ nonisolated enum DeskhubClient {
     static func setLayer(_ layer: AVSampleBufferDisplayLayer?) {
         let ptr = layer.map { Unmanaged.passUnretained($0).toOpaque() }
         dh_set_layer(ptr)
+    }
+
+    // Gõ một phím rời (nhấn + nhả) sang host — dành cho phím đặc biệt tương lai
+    // (Esc, F-key...); phím chữ đi đường charTap. Chỉ có tác dụng khi đang STREAMING.
+    static func keyTap(vk: Int32, scan: Int32) {
+        dh_key_tap(vk, scan)
+    }
+
+    // Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video.
+    static func mouseMove(nx: Int32, ny: Int32) {
+        dh_mouse_move(nx, ny)
+    }
+
+    static func mouseButton(_ button: MouseButton, down: Bool) {
+        dh_mouse_button(button.rawValue, down)
+    }
+
+    // Gõ một ký tự từ bàn phím ảo (core quy đổi sang VK theo layout US).
+    static func charTap(_ codepoint: UInt32) {
+        dh_char_tap(codepoint)
     }
 
     static func phase() -> Phase {

@@ -24,7 +24,7 @@
             android:name=".StreamActivity"
             android:configChanges="orientation|keyboardHidden|screenSize|screenLayout|density|uiMode"
             android:exported="false"
-            android:screenOrientation="sensorLandscape"
+            android:screenOrientation="fullUser"
             android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen" />
     </application>
 </manifest>

@@ -75,6 +75,35 @@ object NativeClient {
      */
     external fun nativeSetSurface(surface: Surface?)
 
+    // Nút chuột theo deskhub::MouseButton (Wire.h).
+    const val MOUSE_LEFT = 1
+    const val MOUSE_RIGHT = 2
+
+    /**
+     * Gõ một phím rời (nhấn + nhả ngay) sang host — dành cho phím đặc biệt tương lai
+     * (Esc, F-key...); phím chữ đi đường [nativeCharTap]. `vk` là mã phím ảo Windows,
+     * `scan` là scancode (bit8 = cờ E0). Chỉ có tác dụng khi phiên đang STREAMING.
+     */
+    external fun nativeKeyTap(
+        vk: Int,
+        scan: Int,
+    )
+
+    /** Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video. */
+    external fun nativeMouseMove(
+        nx: Int,
+        ny: Int,
+    )
+
+    /** Nhấn/nhả nút chuột ([MOUSE_LEFT]/[MOUSE_RIGHT]) tại vị trí con trỏ hiện hành. */
+    external fun nativeMouseButton(
+        button: Int,
+        down: Boolean,
+    )
+
+    /** Gõ một ký tự từ bàn phím ảo (core quy đổi sang VK theo layout US). */
+    external fun nativeCharTap(codepoint: Int)
+
     external fun nativePhase(): Int
 
     external fun nativeStatusLine(): String

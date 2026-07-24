@@ -19,4 +19,6 @@
     <string name="connecting_to">Connecting to %1$s…</string>
     <string name="invalid_address">Invalid address: %1$s</string>
     <string name="disconnected">Disconnected: %1$s — tap to go back</string>
+    <string name="keyboard_button">Keys</string>
+    <string name="disconnect">Disconnect</string>
 </resources>

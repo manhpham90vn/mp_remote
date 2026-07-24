@@ -162,6 +162,32 @@ Java_com_deskhub_app_NativeClient_nativeSetSurface(JNIEnv* env, jobject, jobject
     }
 }
 
+// Gõ một phím rời (nhấn + nhả) sang host — nút F9 trên header màn hình xem.
+// `vk` là mã phím ảo Windows, `scan` là scancode (xem Wire.h).
+JNIEXPORT void JNICALL
+Java_com_deskhub_app_NativeClient_nativeKeyTap(JNIEnv*, jobject, jint vk, jint scan) {
+    if (g_client) g_client->QueueKeyTap(int32_t(vk), int32_t(scan));
+}
+
+// Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video.
+JNIEXPORT void JNICALL
+Java_com_deskhub_app_NativeClient_nativeMouseMove(JNIEnv*, jobject, jint nx, jint ny) {
+    if (g_client) g_client->QueueMouseMoveAbs(int32_t(nx), int32_t(ny));
+}
+
+// Nhấn/nhả nút chuột (1 = trái, 2 = phải) tại vị trí con trỏ hiện hành.
+JNIEXPORT void JNICALL
+Java_com_deskhub_app_NativeClient_nativeMouseButton(JNIEnv*, jobject, jint button,
+    jboolean down) {
+    if (g_client) g_client->QueueMouseButton(int32_t(button), down == JNI_TRUE);
+}
+
+// Gõ một ký tự từ bàn phím ảo (KeyMap của core quy đổi sang VK, layout US).
+JNIEXPORT void JNICALL
+Java_com_deskhub_app_NativeClient_nativeCharTap(JNIEnv*, jobject, jint codepoint) {
+    if (g_client && codepoint > 0) g_client->QueueCharTap(uint32_t(codepoint));
+}
+
 JNIEXPORT jint JNICALL
 Java_com_deskhub_app_NativeClient_nativePhase(JNIEnv*, jobject) {
     return g_client ? jint(g_client->phase()) : jint(ClientLoop::Phase::Idle);
