@@ -89,10 +89,27 @@ object NativeClient {
         scan: Int,
     )
 
+    /** Tổ hợp kiểu Ctrl+C: giữ phím bổ trợ, gõ phím chính, nhả theo đúng thứ tự. */
+    external fun nativeKeyChord(
+        modVk: Int,
+        modScan: Int,
+        vk: Int,
+        scan: Int,
+    )
+
     /** Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video. */
     external fun nativeMouseMove(
         nx: Int,
         ny: Int,
+    )
+
+    /**
+     * Chuột tương đối — chế độ khoá chuột cho game FPS (nút Lock): delta thô,
+     * game tự áp sensitivity.
+     */
+    external fun nativeMouseMoveRel(
+        dx: Int,
+        dy: Int,
     )
 
     /** Nhấn/nhả nút chuột ([MOUSE_LEFT]/[MOUSE_RIGHT]) tại vị trí con trỏ hiện hành. */

@@ -99,9 +99,19 @@ void dh_key_tap(int32_t vk, int32_t scan) {
     if (g_client) g_client->QueueKeyTap(vk, scan);
 }
 
+void dh_key_chord(int32_t mod_vk, int32_t mod_scan, int32_t vk, int32_t scan) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (g_client) g_client->QueueKeyChord(mod_vk, mod_scan, vk, scan);
+}
+
 void dh_mouse_move(int32_t nx, int32_t ny) {
     std::lock_guard<std::mutex> lk(g_mutex);
     if (g_client) g_client->QueueMouseMoveAbs(nx, ny);
+}
+
+void dh_mouse_move_rel(int32_t dx, int32_t dy) {
+    std::lock_guard<std::mutex> lk(g_mutex);
+    if (g_client) g_client->QueueMouseMoveRel(dx, dy);
 }
 
 void dh_mouse_button(int32_t button, bool down) {

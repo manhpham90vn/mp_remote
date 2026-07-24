@@ -6,8 +6,9 @@
 // phần chrome. Điều khiển host:
 //   - Trackpad ảo trên khung video: con trỏ luôn hiện, rê ngón di chuột theo delta,
 //     tap 1 = click trái, tap 2 = click phải, giữ rồi kéo = drag (TouchInputView).
-//   - Thanh đáy: phím tắt Esc/Tab/Enter/F9 (kHotkeys — bàn phím ảo không có những
-//     phím này), nút Keys bật bàn phím ảo (KeyInputView), nút Disconnect.
+//   - Thanh đáy: phím tắt Esc/Tab/Enter/mũi tên/Del/Ctrl+C/Ctrl+V (kHotkeys — bàn
+//     phím ảo không có những phím này), nút Keys bật bàn phím ảo (KeyInputView),
+//     nút Disconnect.
 // Cập nhật mỗi 500ms từ SessionModel. Màn hình xoay theo hướng thiết bị.
 // =============================================================================
 import AVFoundation
@@ -15,19 +16,30 @@ import SwiftUI
 import UIKit
 
 /// Một phím tắt gửi thẳng sang host — bàn phím ảo không có những phím này.
-/// Thêm phím mới = thêm một dòng: mã phím ảo Windows + scancode US (bit8 = cờ E0).
+/// `modVk` != 0 -> tổ hợp (giữ phím bổ trợ rồi gõ phím chính): Ctrl+C, Ctrl+V...
+/// Thêm phím mới = thêm một dòng: mã phím ảo Windows + scancode US (bit8 = cờ E0
+/// cho phím mở rộng như mũi tên/Del).
 private struct Hotkey {
     let label: String
     let vk: Int32
     let scan: Int32
+    var modVk: Int32 = 0
+    var modScan: Int32 = 0
 }
 
-// Esc/Tab/Enter đủ cho thoát menu, chuyển ô, xác nhận; F9 cho phím tắt game.
+// Không đưa Alt+Tab/phím Win vào: chúng chuyển focus khỏi cửa sổ đang chia sẻ,
+// host sẽ ngừng nhận input (xem TargetHasFocus bên InputInjector).
 private let kHotkeys: [Hotkey] = [
     Hotkey(label: "Esc", vk: 0x1B, scan: 0x01),
     Hotkey(label: "Tab", vk: 0x09, scan: 0x0F),
     Hotkey(label: "Enter", vk: 0x0D, scan: 0x1C),
-    Hotkey(label: "F9", vk: 0x78, scan: 0x43),
+    Hotkey(label: "↑", vk: 0x26, scan: 0x148),
+    Hotkey(label: "↓", vk: 0x28, scan: 0x150),
+    Hotkey(label: "←", vk: 0x25, scan: 0x14B),
+    Hotkey(label: "→", vk: 0x27, scan: 0x14D),
+    Hotkey(label: "Del", vk: 0x2E, scan: 0x153),
+    Hotkey(label: "Ctrl+C", vk: 0x43, scan: 0x2E, modVk: 0x11, modScan: 0x1D),
+    Hotkey(label: "Ctrl+V", vk: 0x56, scan: 0x2F, modVk: 0x11, modScan: 0x1D),
 ]
 
 struct StreamView: View {
@@ -52,11 +64,12 @@ struct StreamView: View {
                     videoContent
                         .aspectRatio(aspectRatio, contentMode: .fit)
 
-                    // Lớp phủ touch cùng aspectRatio -> bounds trùng khít khung video,
-                    // toạ độ chuẩn hoá khớp hệ mà host mong đợi.
+                    // Trackpad phủ CẢ ZStack — gồm vùng đen letterbox quanh video:
+                    // rê tay ở đâu cũng di được chuột (trackpad chạy theo delta).
+                    // Con trỏ và toạ độ gửi đi vẫn bám khung video thật (overlay tự
+                    // tính rect từ videoAspect).
                     if model.phase == .streaming {
-                        TouchInputView(model: model)
-                            .aspectRatio(aspectRatio, contentMode: .fit)
+                        TouchInputView(model: model, videoAspect: aspectRatio)
                     }
 
                     // View hứng phím: vô hình, chỉ tồn tại để giữ first responder.
@@ -72,7 +85,7 @@ struct StreamView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                bottomBar
+                bottomBar(portrait: portrait)
             }
         }
         .background(Color.black.ignoresSafeArea())
@@ -121,17 +134,33 @@ struct StreamView: View {
         .background(Color(white: 0.09))
     }
 
-    // Thanh nút dưới đáy — mọi chiều màn hình, cuộn ngang được khi chật.
-    private var bottomBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 12) {
+    // Thanh nút dưới đáy — mọi chiều màn hình. DỌC: màn hình còn nhiều khung đen
+    // nên cho nút TỰ XUỐNG DÒNG (grid adaptive) — thấy hết phím, không phải cuộn.
+    // NGANG: chiều cao quý hơn, giữ một hàng cuộn ngang cho gọn.
+    @ViewBuilder
+    private func bottomBar(portrait: Bool) -> some View {
+        if portrait {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 72), spacing: 8)],
+                spacing: 8
+            ) {
                 controlButtons
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .background(Color(white: 0.09))
+        } else {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 12) {
+                    controlButtons
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
+            .frame(maxWidth: .infinity)
+            .background(Color(white: 0.09))
         }
-        .frame(maxWidth: .infinity)
-        .background(Color(white: 0.09))
     }
 
     // Cụm nút của thanh đáy: phím tắt kHotkeys (gõ thẳng phím sang host — bàn phím
@@ -140,12 +169,20 @@ struct StreamView: View {
     @ViewBuilder
     private var controlButtons: some View {
         ForEach(kHotkeys, id: \.label) { hotkey in
-            Button(hotkey.label) { model.keyTap(vk: hotkey.vk, scan: hotkey.scan) }
-                .font(.caption.bold())
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .tint(.white)
-                .disabled(model.phase != .streaming)
+            Button(hotkey.label) {
+                if hotkey.modVk != 0 {
+                    model.keyChord(
+                        modVk: hotkey.modVk, modScan: hotkey.modScan,
+                        vk: hotkey.vk, scan: hotkey.scan)
+                } else {
+                    model.keyTap(vk: hotkey.vk, scan: hotkey.scan)
+                }
+            }
+            .font(.caption.bold())
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(.white)
+            .disabled(model.phase != .streaming)
         }
 
         Button("Keys") { keyboardOn.toggle() }

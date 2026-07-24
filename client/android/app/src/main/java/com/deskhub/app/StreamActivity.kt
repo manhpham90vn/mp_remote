@@ -5,8 +5,9 @@
 //   Dựng Surface cho bộ giải mã vẽ vào, khởi động phiên, và điều khiển host:
 //   - Trackpad ảo trên khung video: con trỏ luôn hiện, rê ngón di chuột theo delta,
 //     tap 1 = click trái, tap 2 = click phải, giữ rồi kéo = drag (TrackpadOverlay).
-//   - Thanh đáy: phím tắt Esc/Tab/Enter/F9 (kHotkeys — bàn phím ảo không có những
-//     phím này), nút Keys bật bàn phím ảo (KeyInputView), nút Disconnect.
+//   - Thanh đáy: phím tắt Esc/Tab/Enter/mũi tên/Del/Ctrl+C/Ctrl+V (kHotkeys — bàn
+//     phím ảo không có những phím này), nút Keys bật bàn phím ảo (KeyInputView),
+//     nút Disconnect.
 //   Nhận địa chỉ host và sourceId qua Intent extra từ MainActivity. Màn hình xoay
 //   theo hướng thiết bị (fullUser trong manifest) — không ép ngang.
 //
@@ -52,7 +53,10 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
@@ -76,6 +80,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.isSpecified
 import androidx.compose.ui.geometry.isUnspecified
 import androidx.compose.ui.graphics.Color
@@ -154,6 +159,9 @@ class StreamActivity : ComponentActivity() {
     }
 }
 
+// OptIn: FlowRow (thanh nút xuống dòng ở chế độ dọc) còn nằm sau cờ experimental
+// của Compose foundation.
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun StreamScreen(
     address: String,
@@ -275,14 +283,9 @@ private fun StreamScreen(
             if (started) {
                 // Modifier.aspectRatio lo luôn việc letterbox theo tỉ lệ video — đây là
                 // thứ bản NativeActivity thuần không làm nổi (phải tự tính layout params).
-                // Trackpad phủ đúng khung video (không phải cả Box) để toạ độ con trỏ
-                // chuẩn hoá 0..65535 khớp với khung hình host capture.
+                val aspect = if (videoW > 0 && videoH > 0) videoW.toFloat() / videoH else null
                 val videoModifier =
-                    if (videoW > 0 && videoH > 0) {
-                        Modifier.aspectRatio(videoW.toFloat() / videoH.toFloat())
-                    } else {
-                        Modifier.fillMaxSize()
-                    }
+                    if (aspect != null) Modifier.aspectRatio(aspect) else Modifier.fillMaxSize()
 
                 Box(modifier = videoModifier) {
                     AndroidView(
@@ -291,7 +294,17 @@ private fun StreamScreen(
                         },
                         modifier = Modifier.fillMaxSize(),
                     )
-                    if (streaming) TrackpadOverlay(modifier = Modifier.fillMaxSize())
+                }
+
+                // Trackpad phủ CẢ Box ngoài — gồm cả vùng đen letterbox trên/dưới
+                // (chế độ dọc): rê tay ở đâu cũng di được chuột, vì trackpad chạy
+                // theo delta chứ không theo điểm chạm. Con trỏ và toạ độ gửi đi vẫn
+                // bám khung video thật (overlay tự tính rect từ `aspect`).
+                if (streaming) {
+                    TrackpadOverlay(
+                        videoAspect = aspect,
+                        modifier = Modifier.fillMaxSize(),
+                    )
                 }
 
                 // View hứng phím: 1dp, vô hình, chỉ tồn tại để giữ focus cho IME.
@@ -306,46 +319,74 @@ private fun StreamScreen(
             }
         }
 
-        // Thanh nút dưới đáy — mọi chiều màn hình. Box canh giữa khi thừa chỗ;
-        // Row bên trong cuộn ngang khi thiếu (điện thoại hẹp, chế độ dọc).
-        Box(
-            modifier =
-                Modifier
-                    .fillMaxWidth()
-                    .background(Color(0xFF161616)),
-            contentAlignment = Alignment.Center,
-        ) {
-            Row(
-                modifier = Modifier.horizontalScroll(rememberScrollState()),
-                verticalAlignment = Alignment.CenterVertically,
+        // Thanh nút dưới đáy — mọi chiều màn hình. DỌC: màn hình còn nhiều khung
+        // đen nên cho nút TỰ XUỐNG DÒNG (FlowRow) — thấy hết phím, không phải cuộn.
+        // NGANG: chiều cao quý hơn, giữ một hàng cuộn ngang cho gọn.
+        val buttons: @Composable () -> Unit = {
+            ControlButtons(
+                controlsEnabled = streaming,
+                keyboardOn = keyboardOn,
+                onToggleKeyboard = { keyboardOn = !keyboardOn },
+                onDisconnect = onDismiss,
+            )
+        }
+        if (portrait) {
+            FlowRow(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF161616)),
+                horizontalArrangement = Arrangement.Center,
             ) {
-                ControlButtons(
-                    controlsEnabled = streaming,
-                    keyboardOn = keyboardOn,
-                    onToggleKeyboard = { keyboardOn = !keyboardOn },
-                    onDisconnect = onDismiss,
-                )
+                buttons()
+            }
+        } else {
+            Box(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF161616)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Row(
+                    modifier = Modifier.horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    buttons()
+                }
             }
         }
     }
 }
 
-/** Một phím tắt gửi thẳng sang host — bàn phím ảo không có những phím này. */
+/**
+ * Một phím tắt gửi thẳng sang host — bàn phím ảo không có những phím này.
+ * `modVk` != 0 -> tổ hợp (giữ phím bổ trợ rồi gõ phím chính): Ctrl+C, Ctrl+V...
+ */
 private data class Hotkey(
     val label: String,
     val vk: Int,
     val scan: Int,
+    val modVk: Int = 0,
+    val modScan: Int = 0,
 )
 
-// Esc/Tab/Enter đủ cho thoát menu, chuyển ô, xác nhận; F9 cho phím tắt game.
 // Thêm phím mới = thêm một dòng: mã phím ảo Windows + scancode US (bit8 = cờ E0
-// cho phím mở rộng như mũi tên — xem Wire.h).
+// cho phím mở rộng như mũi tên/Del — xem Wire.h). Không đưa Alt+Tab/phím Win vào:
+// chúng chuyển focus khỏi cửa sổ đang chia sẻ, host sẽ ngừng nhận input (xem
+// TargetHasFocus bên InputInjector).
 private val kHotkeys =
     listOf(
         Hotkey("Esc", 0x1B, 0x01),
         Hotkey("Tab", 0x09, 0x0F),
         Hotkey("Enter", 0x0D, 0x1C),
-        Hotkey("F9", 0x78, 0x43),
+        Hotkey("↑", 0x26, 0x148),
+        Hotkey("↓", 0x28, 0x150),
+        Hotkey("←", 0x25, 0x14B),
+        Hotkey("→", 0x27, 0x14D),
+        Hotkey("Del", 0x2E, 0x153),
+        Hotkey("Ctrl+C", 0x43, 0x2E, modVk = 0x11, modScan = 0x1D),
+        Hotkey("Ctrl+V", 0x56, 0x2F, modVk = 0x11, modScan = 0x1D),
     )
 
 /**
@@ -359,30 +400,51 @@ private val kHotkeys =
  *   Tap 2 lần     = click phải tại con trỏ.
  *   Giữ rồi kéo   = giữ chuột trái và rê (kéo cửa sổ, bôi đen), nhấc tay là nhả.
  *
- * Con trỏ tính bằng px trong khung video; gửi sang host dưới dạng chuẩn hoá
- * 0..65535 qua [sendMouseMove].
+ * Overlay phủ CẢ vùng hiển thị (gồm vùng đen letterbox), nhưng con trỏ bị kẹp
+ * trong KHUNG VIDEO thật — rect tính từ `videoAspect` (aspect-fit, canh giữa) —
+ * và toạ độ gửi đi chuẩn hoá 0..65535 theo rect đó qua [sendMouseMove].
  */
 @Composable
-private fun TrackpadOverlay(modifier: Modifier) {
+private fun TrackpadOverlay(
+    videoAspect: Float?,
+    modifier: Modifier,
+) {
     var cursor by remember { mutableStateOf(Offset.Unspecified) }
     // Khung đổi kích thước (xoay màn hình) -> kẹp con trỏ lại trong khung mới.
     var bounds by remember { mutableStateOf(IntSize.Zero) }
 
+    // Khung video thật bên trong overlay: aspect-fit canh giữa — trùng công thức
+    // letterbox của Modifier.aspectRatio bên ngoài.
+    fun videoRect(): Rect {
+        if (bounds.width <= 0 || bounds.height <= 0) return Rect.Zero
+        val bw = bounds.width.toFloat()
+        val bh = bounds.height.toFloat()
+        if (videoAspect == null || videoAspect <= 0f) return Rect(0f, 0f, bw, bh)
+        return if (bw / bh > videoAspect) {
+            val vw = bh * videoAspect // thừa ngang: video cao hết cỡ, đen hai bên
+            Rect((bw - vw) / 2f, 0f, (bw + vw) / 2f, bh)
+        } else {
+            val vh = bw / videoAspect // thừa dọc: video rộng hết cỡ, đen trên dưới
+            Rect(0f, (bh - vh) / 2f, bw, (bh + vh) / 2f)
+        }
+    }
+
     fun moveBy(delta: Offset) {
-        if (bounds.width <= 0 || cursor.isUnspecified) return
+        val rect = videoRect()
+        if (rect.width <= 0f || cursor.isUnspecified) return
         cursor =
             Offset(
-                (cursor.x + delta.x).coerceIn(0f, bounds.width.toFloat()),
-                (cursor.y + delta.y).coerceIn(0f, bounds.height.toFloat()),
+                (cursor.x + delta.x).coerceIn(rect.left, rect.right),
+                (cursor.y + delta.y).coerceIn(rect.top, rect.bottom),
             )
-        sendMouseMove(cursor, bounds)
+        sendMouseMove(cursor, rect)
     }
 
     // Host cũng có người dùng thật di chuột được — gửi lại vị trí con trỏ ngay
     // trước mỗi cú click để chắc chắn click rơi đúng chỗ con trỏ đang hiển thị.
     fun clickAt(button: Int) {
         if (cursor.isUnspecified) return
-        sendMouseMove(cursor, bounds)
+        sendMouseMove(cursor, videoRect())
         NativeClient.nativeMouseButton(button, true)
         NativeClient.nativeMouseButton(button, false)
     }
@@ -392,13 +454,14 @@ private fun TrackpadOverlay(modifier: Modifier) {
             modifier
                 .onSizeChanged { sz ->
                     bounds = sz
+                    val rect = videoRect()
                     cursor =
                         if (cursor.isUnspecified) {
-                            Offset(sz.width / 2f, sz.height / 2f)
+                            rect.center
                         } else {
                             Offset(
-                                cursor.x.coerceIn(0f, sz.width.toFloat()),
-                                cursor.y.coerceIn(0f, sz.height.toFloat()),
+                                cursor.x.coerceIn(rect.left, rect.right),
+                                cursor.y.coerceIn(rect.top, rect.bottom),
                             )
                         }
                 }.pointerInput(Unit) {
@@ -422,7 +485,7 @@ private fun TrackpadOverlay(modifier: Modifier) {
                     // slop trước, bên này cần đứng yên trước — loại trừ lẫn nhau.
                     detectDragGesturesAfterLongPress(
                         onDragStart = {
-                            sendMouseMove(cursor, bounds)
+                            if (cursor.isSpecified) sendMouseMove(cursor, videoRect())
                             NativeClient.nativeMouseButton(NativeClient.MOUSE_LEFT, true)
                         },
                         onDrag = { change, delta ->
@@ -469,22 +532,23 @@ private fun CursorArrow(modifier: Modifier) {
     }
 }
 
+// Chuẩn hoá vị trí con trỏ theo KHUNG VIDEO (không phải cả overlay) rồi gửi.
 private fun sendMouseMove(
     pos: Offset,
-    size: IntSize,
+    rect: Rect,
 ) {
-    if (size.width <= 0 || size.height <= 0) return
+    if (rect.width <= 0f || rect.height <= 0f) return
     NativeClient.nativeMouseMove(
-        (pos.x / size.width * 65535f).roundToInt(),
-        (pos.y / size.height * 65535f).roundToInt(),
+        (((pos.x - rect.left) / rect.width) * 65535f).roundToInt(),
+        (((pos.y - rect.top) / rect.height) * 65535f).roundToInt(),
     )
 }
 
 /**
- * Cụm nút của thanh đáy: phím tắt [kHotkeys] (gõ thẳng phím sang host — bàn phím
- * ảo không có những phím này), Keys (bật/tắt bàn phím ảo) và Disconnect. Phím tắt
- * và Keys chỉ bấm được khi đang STREAMING vì trước đó kênh input chưa tồn tại.
- * Không tự bọc Row — caller lo phần khung + cuộn ngang.
+ * Cụm nút của thanh đáy: phím tắt [kHotkeys] (gõ thẳng phím/tổ hợp sang host —
+ * bàn phím ảo không có những phím này), Keys (bật/tắt bàn phím ảo) và Disconnect.
+ * Trừ Disconnect, các nút chỉ bấm được khi đang STREAMING vì trước đó kênh input
+ * chưa tồn tại. Không tự bọc Row — caller lo phần khung + cuộn ngang.
  */
 @Composable
 private fun ControlButtons(
@@ -495,7 +559,13 @@ private fun ControlButtons(
 ) {
     kHotkeys.forEach { hk ->
         TextButton(
-            onClick = { NativeClient.nativeKeyTap(hk.vk, hk.scan) },
+            onClick = {
+                if (hk.modVk != 0) {
+                    NativeClient.nativeKeyChord(hk.modVk, hk.modScan, hk.vk, hk.scan)
+                } else {
+                    NativeClient.nativeKeyTap(hk.vk, hk.scan)
+                }
+            },
             enabled = controlsEnabled,
         ) {
             Text(hk.label, fontSize = 13.sp)

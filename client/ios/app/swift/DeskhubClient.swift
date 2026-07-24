@@ -65,9 +65,19 @@ nonisolated enum DeskhubClient {
         dh_key_tap(vk, scan)
     }
 
+    // Tổ hợp kiểu Ctrl+C: giữ phím bổ trợ, gõ phím chính, nhả theo đúng thứ tự.
+    static func keyChord(modVk: Int32, modScan: Int32, vk: Int32, scan: Int32) {
+        dh_key_chord(modVk, modScan, vk, scan)
+    }
+
     // Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video.
     static func mouseMove(nx: Int32, ny: Int32) {
         dh_mouse_move(nx, ny)
+    }
+
+    // Chuột tương đối — chế độ khoá chuột cho game FPS (nút Lock): delta thô.
+    static func mouseMoveRel(dx: Int32, dy: Int32) {
+        dh_mouse_move_rel(dx, dy)
     }
 
     static func mouseButton(_ button: MouseButton, down: Bool) {

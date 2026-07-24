@@ -175,6 +175,20 @@ Java_com_deskhub_app_NativeClient_nativeMouseMove(JNIEnv*, jobject, jint nx, jin
     if (g_client) g_client->QueueMouseMoveAbs(int32_t(nx), int32_t(ny));
 }
 
+// Tổ hợp kiểu Ctrl+C: giữ phím bổ trợ, gõ phím chính, nhả theo đúng thứ tự.
+JNIEXPORT void JNICALL
+Java_com_deskhub_app_NativeClient_nativeKeyChord(JNIEnv*, jobject, jint modVk, jint modScan,
+    jint vk, jint scan) {
+    if (g_client)
+        g_client->QueueKeyChord(int32_t(modVk), int32_t(modScan), int32_t(vk), int32_t(scan));
+}
+
+// Chuột tương đối (chế độ khoá chuột cho game FPS): delta thô, absolute = 0.
+JNIEXPORT void JNICALL
+Java_com_deskhub_app_NativeClient_nativeMouseMoveRel(JNIEnv*, jobject, jint dx, jint dy) {
+    if (g_client) g_client->QueueMouseMoveRel(int32_t(dx), int32_t(dy));
+}
+
 // Nhấn/nhả nút chuột (1 = trái, 2 = phải) tại vị trí con trỏ hiện hành.
 JNIEXPORT void JNICALL
 Java_com_deskhub_app_NativeClient_nativeMouseButton(JNIEnv*, jobject, jint button,

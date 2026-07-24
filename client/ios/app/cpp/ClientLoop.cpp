@@ -87,6 +87,46 @@ void ClientLoop::QueueMouseMoveAbs(int32_t nx, int32_t ny) {
     wantFocus_.store(true, std::memory_order_release);
 }
 
+// Tổ hợp kiểu Ctrl+C. Cả cụm vào hàng đợi trong MỘT lần giữ khóa để không bị event
+// khác chen giữa. Hai cú nhả cùng hạn nhưng phím chính được xếp TRƯỚC trong
+// delayedInput_ — vòng vét đi theo thứ tự nên phím chính luôn nhả trước phím bổ trợ.
+void ClientLoop::QueueKeyChord(int32_t modVk, int32_t modScan, int32_t vk, int32_t scan) {
+    const uint64_t now = NowUs();
+    auto key = [now](int32_t kvk, int32_t kscan, bool down) {
+        deskhub::InputEvent e;
+        e.type = deskhub::InputType::Key;
+        e.timestampUs = now;
+        e.a = kvk;
+        e.b = kscan;
+        e.state = down ? 1 : 0;
+        return e;
+    };
+    {
+        std::lock_guard<std::mutex> lk(inputMutex_);
+        inputQueue_.push_back(key(modVk, modScan, true));
+        inputQueue_.push_back(key(vk, scan, true));
+        delayedInput_.emplace_back(now + kTapHoldUs, key(vk, scan, false));
+        delayedInput_.emplace_back(now + kTapHoldUs, key(modVk, modScan, false));
+    }
+    wantFocus_.store(true, std::memory_order_release);
+}
+
+// Chuột tương đối (chế độ khoá chuột): delta thô đi thẳng, không kẹp biên.
+void ClientLoop::QueueMouseMoveRel(int32_t dx, int32_t dy) {
+    if (dx == 0 && dy == 0) return;
+    deskhub::InputEvent e;
+    e.type = deskhub::InputType::MouseMove;
+    e.timestampUs = NowUs();
+    e.a = dx;
+    e.b = dy;
+    e.absolute = 0;
+    {
+        std::lock_guard<std::mutex> lk(inputMutex_);
+        inputQueue_.push_back(e);
+    }
+    wantFocus_.store(true, std::memory_order_release);
+}
+
 void ClientLoop::QueueMouseButton(int32_t button, bool down) {
     deskhub::InputEvent e;
     e.type = deskhub::InputType::MouseButton;

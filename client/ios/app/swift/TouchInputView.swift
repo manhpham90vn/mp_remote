@@ -1,12 +1,12 @@
 // =============================================================================
-// TouchInputView.swift — trackpad ảo phủ lên khung video, kiểu bàn di chuột laptop.
+// TouchInputView.swift — trackpad ảo phủ lên vùng hiển thị, kiểu bàn di chuột laptop.
 //                        Đối ứng TrackpadOverlay bên Android.
 //
 // VÌ SAO TRACKPAD CHỨ KHÔNG PHẢI CHẠM-TRỰC-TIẾP
 //   Chạm thẳng vào điểm muốn click nghe hợp lý nhưng khó dùng thật: ngón tay che
-//   mất chỗ cần bấm và không bấm chính xác được mục tiêu nhỏ (nút đóng cửa sổ,
-//   menu). Trackpad tách ngón tay khỏi con trỏ: con trỏ LUÔN hiện, ngón rê ở đâu
-//   cũng được — con trỏ dịch theo DELTA.
+//   mất chỗ cần bấm và không bấm chính xác được mục tiêu nhỏ. Trackpad tách ngón
+//   tay khỏi con trỏ: con trỏ LUÔN hiện, ngón rê ở đâu cũng được — kể cả vùng đen
+//   letterbox quanh video (overlay phủ CẢ vùng hiển thị, không chỉ khung video).
 //
 // CỬ CHỈ -> CHUỘT
 //   Rê ngón       = di con trỏ.
@@ -17,9 +17,9 @@
 //   press cần đứng yên trước — không tranh chấp.
 //
 // TOẠ ĐỘ
-//   Con trỏ tính bằng pt trong bounds của view; view được đặt cùng aspectRatio với
-//   khung video nên bounds trùng khít khung hình host capture. Gửi sang host dạng
-//   chuẩn hoá 0..65535 — hệ mà InputInjector bên host mong đợi.
+//   Con trỏ bị kẹp trong KHUNG VIDEO thật — rect aspect-fit canh giữa tính từ
+//   `videoAspect` — và toạ độ gửi đi chuẩn hoá 0..65535 theo rect đó, đúng hệ mà
+//   InputInjector bên host mong đợi.
 //
 // LIÊN QUAN: StreamView.swift (nơi đặt overlay), SessionModel (chuyển tiếp xuống C++)
 // =============================================================================
@@ -28,6 +28,7 @@ import UIKit
 
 struct TouchInputView: UIViewRepresentable {
     let model: SessionModel
+    let videoAspect: CGFloat
 
     func makeUIView(context: Context) -> TouchCaptureUIView {
         let view = TouchCaptureUIView()
@@ -37,11 +38,17 @@ struct TouchInputView: UIViewRepresentable {
 
     func updateUIView(_ uiView: TouchCaptureUIView, context: Context) {
         uiView.model = model
+        uiView.videoAspect = videoAspect
     }
 }
 
 final class TouchCaptureUIView: UIView {
     weak var model: SessionModel?
+
+    // Tỉ lệ khung video — quyết định rect mà con trỏ được phép đứng trong.
+    var videoAspect: CGFloat = 0 {
+        didSet { setNeedsLayout() }
+    }
 
     // Mũi tên con trỏ: SF Symbol trắng + bóng đen để nổi trên mọi nền video.
     private let cursorView: UIImageView = {
@@ -84,15 +91,28 @@ final class TouchCaptureUIView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError("init(coder:) is not supported") }
 
-    // Lần đầu biết kích thước: đặt con trỏ giữa khung (chỉ hiển thị, KHÔNG gửi —
-    // đừng tự di chuột host khi vừa kết nối). Khung đổi kích thước (xoay máy):
-    // kẹp con trỏ lại trong khung mới.
+    // Khung video thật bên trong overlay: aspect-fit canh giữa — trùng công thức
+    // letterbox của .aspectRatio bên StreamView.
+    private var videoRect: CGRect {
+        guard bounds.width > 0, bounds.height > 0 else { return .zero }
+        guard videoAspect > 0 else { return bounds }
+        if bounds.width / bounds.height > videoAspect {
+            let vw = bounds.height * videoAspect // thừa ngang: đen hai bên
+            return CGRect(x: (bounds.width - vw) / 2, y: 0, width: vw, height: bounds.height)
+        }
+        let vh = bounds.width / videoAspect // thừa dọc: đen trên dưới
+        return CGRect(x: 0, y: (bounds.height - vh) / 2, width: bounds.width, height: vh)
+    }
+
+    // Lần đầu biết kích thước: đặt con trỏ giữa khung video (chỉ hiển thị, KHÔNG
+    // gửi — đừng tự di chuột host khi vừa kết nối). Khung đổi (xoay máy): kẹp lại.
     override func layoutSubviews() {
         super.layoutSubviews()
-        guard bounds.width > 0, bounds.height > 0 else { return }
+        let rect = videoRect
+        guard rect.width > 0, rect.height > 0 else { return }
         if !cursorPlaced {
             cursorPlaced = true
-            cursor = CGPoint(x: bounds.midX, y: bounds.midY)
+            cursor = CGPoint(x: rect.midX, y: rect.midY)
         } else {
             cursor = clamped(cursor)
         }
@@ -100,9 +120,10 @@ final class TouchCaptureUIView: UIView {
     }
 
     private func clamped(_ p: CGPoint) -> CGPoint {
-        CGPoint(
-            x: min(max(0, p.x), bounds.width),
-            y: min(max(0, p.y), bounds.height))
+        let rect = videoRect
+        return CGPoint(
+            x: min(max(rect.minX, p.x), rect.maxX),
+            y: min(max(rect.minY, p.y), rect.maxY))
     }
 
     // Đỉnh mũi tên của "cursorarrow" nằm ở góc trên-trái icon -> origin đặt đúng
@@ -113,11 +134,13 @@ final class TouchCaptureUIView: UIView {
         sendMove()
     }
 
+    // Chuẩn hoá vị trí con trỏ theo KHUNG VIDEO (không phải cả overlay) rồi gửi.
     private func sendMove() {
-        guard bounds.width > 0, bounds.height > 0 else { return }
+        let rect = videoRect
+        guard rect.width > 0, rect.height > 0 else { return }
         model?.mouseMove(
-            nx: Int32((cursor.x / bounds.width * 65535).rounded()),
-            ny: Int32((cursor.y / bounds.height * 65535).rounded()))
+            nx: Int32(((cursor.x - rect.minX) / rect.width * 65535).rounded()),
+            ny: Int32(((cursor.y - rect.minY) / rect.height * 65535).rounded()))
     }
 
     // Host cũng có người dùng thật di chuột được — gửi lại vị trí con trỏ ngay

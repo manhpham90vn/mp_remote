@@ -75,9 +75,14 @@ final class SessionModel {
     // --- Điều khiển từ touch/bàn phím ảo (StreamView + TouchInputView/KeyInputView).
     // Chỉ chuyển tiếp xuống facade; tầng C++ tự bỏ qua khi chưa STREAMING. ---
 
-    // Gõ một phím tắt rời (Esc/Tab/Enter/F9... — thanh phím tắt của StreamView).
+    // Gõ một phím tắt rời (Esc/Tab/Enter/mũi tên... — thanh phím tắt của StreamView).
     func keyTap(vk: Int32, scan: Int32) {
         DeskhubClient.keyTap(vk: vk, scan: scan)
+    }
+
+    // Tổ hợp kiểu Ctrl+C từ thanh phím tắt.
+    func keyChord(modVk: Int32, modScan: Int32, vk: Int32, scan: Int32) {
+        DeskhubClient.keyChord(modVk: modVk, modScan: modScan, vk: vk, scan: scan)
     }
 
     func mouseMove(nx: Int32, ny: Int32) {

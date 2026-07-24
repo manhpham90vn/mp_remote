@@ -65,8 +65,14 @@ void dh_set_layer(void* layer);
 // Chỉ có tác dụng khi phiên đang STREAMING.
 void dh_key_tap(int32_t vk, int32_t scan);
 
+// Tổ hợp kiểu Ctrl+C: giữ phím bổ trợ, gõ phím chính, nhả theo đúng thứ tự.
+void dh_key_chord(int32_t mod_vk, int32_t mod_scan, int32_t vk, int32_t scan);
+
 // Chuột tuyệt đối từ touch: toạ độ chuẩn hoá 0..65535 trong khung video.
 void dh_mouse_move(int32_t nx, int32_t ny);
+
+// Chuột tương đối — chế độ khoá chuột cho game FPS (nút Lock): delta thô.
+void dh_mouse_move_rel(int32_t dx, int32_t dy);
 
 // Nhấn/nhả nút chuột (1 = trái, 2 = phải) tại vị trí con trỏ hiện hành.
 void dh_mouse_button(int32_t button, bool down);

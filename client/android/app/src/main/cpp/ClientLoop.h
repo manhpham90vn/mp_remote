@@ -107,14 +107,24 @@ public:
     // hàng đợi mỗi vòng rồi giao ClientSession đánh seq và gửi lặp chống kẹt phím
     // (InputSender). Chỉ có tác dụng khi phiên đang STREAMING. ---
 
-    // Gõ một phím rời (nhấn rồi nhả ngay) sang host — phục vụ nút F9 trên header.
+    // Gõ một phím rời (nhấn rồi nhả sau kTapHoldUs) sang host — thanh phím tắt.
     // `vk` là mã phím ảo Windows, `scan` là scancode (bit8 = cờ E0, xem Wire.h).
     void QueueKeyTap(int32_t vk, int32_t scan);
+
+    // Tổ hợp kiểu Ctrl+C: giữ phím bổ trợ (`modVk`), gõ phím chính, nhả phím chính
+    // rồi mới nhả phím bổ trợ (cả hai nhả sau kTapHoldUs).
+    void QueueKeyChord(int32_t modVk, int32_t modScan, int32_t vk, int32_t scan);
 
     // Chuột tuyệt đối từ màn hình cảm ứng: `nx`/`ny` chuẩn hoá 0..65535 trong khung
     // video — cùng hệ toạ độ với InputCapture bên Windows, host map lên khung hình
     // đã capture. Caller tự chuẩn hoá theo rect của view video; ở đây chỉ kẹp biên.
     void QueueMouseMoveAbs(int32_t nx, int32_t ny);
+
+    // Chuột TƯƠNG ĐỐI — chế độ khoá chuột cho game FPS (đối ứng F9 bên client
+    // Windows): dx/dy là delta thô, absolute = 0, host bơm qua SendMoveRelative và
+    // game tự áp sensitivity. UI hiện CHƯA có nút bật (nút Lock từng có, bỏ vì rối
+    // giao diện) — giữ API cho khi cần lại. Không kẹp biên — delta không có biên.
+    void QueueMouseMoveRel(int32_t dx, int32_t dy);
 
     // Nhấn/nhả một nút chuột tại vị trí con trỏ hiện hành. `button` theo
     // deskhub::MouseButton (1 = trái, 2 = phải).
