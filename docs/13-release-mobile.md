@@ -62,15 +62,44 @@ xin cấp lại được.
 
 ## Bước 3 — Android: service account cho Play Console
 
-1. Play Console → **Setup** → **API access** → link tới Google Cloud project
-   (tạo mới nếu chưa có).
-2. Trong Google Cloud Console: **IAM & Admin** → **Service Accounts** →
-   **Create service account** (vd `deskhub-publisher`) → tạo **Key** dạng
-   JSON, tải file về.
-3. Quay lại Play Console → API access → mục Service accounts → **Grant
-   access** cho account vừa tạo → cấp quyền **Release manager** (đủ để upload
-   bản + sửa listing) trên app `com.manhpham.deskhub`.
-4. Secret `PLAY_JSON_KEY` = NGUYÊN VĂN nội dung file JSON (không base64).
+(Trang "Setup → API access" cũ đã bị Google gỡ khỏi Play Console cuối 2024 —
+không còn bước link Google Cloud project nữa; giờ service account được mời
+thẳng như một user thường.)
+
+1. Vào [Google Cloud Console](https://console.cloud.google.com): tạo (hoặc
+   chọn) một project bất kỳ.
+2. **APIs & Services** → **Library** → tìm **Google Play Android Developer
+   API** → **Enable** cho project đó.
+3. **IAM & Admin** → **Service Accounts** → **Create service account** (vd
+   `deskhub-publisher`; KHÔNG cần cấp role IAM nào của Google Cloud) → vào tab
+   **Keys** của account vừa tạo → **Add key** → **Create new key** → **JSON**
+   → tải file về. Ghi lại email của service account
+   (dạng `deskhub-publisher@<project>.iam.gserviceaccount.com`).
+4. Sang [Play Console](https://play.google.com/console) → **Users and
+   permissions** → **Invite new users** → dán email service account ở trên →
+   tab **App permissions** → chọn app `com.manhpham.deskhub` → cấp các quyền:
+   - **Releases**: "Release apps to testing tracks" + "Manage testing tracks
+     and edit tester lists" (đủ cho track internal; muốn CI phát hành thẳng
+     production thì thêm "Release to production")
+   - **Store presence**: "Edit store listing, pricing & distribution" (cho
+     lane metadata)
+   rồi **Invite user** / **Send invite** (service account nhận quyền ngay,
+   không cần bấm chấp nhận lời mời).
+5. Secret `PLAY_JSON_KEY` = NGUYÊN VĂN nội dung file JSON (không base64).
+
+Nếu lần chạy đầu supply báo lỗi 401/403 "The current user has insufficient
+permissions": kiểm tra đã Enable đúng API ở bước 2 và đợi vài phút cho quyền
+lan truyền — quyền mới cấp trên Play đôi khi trễ tới 24h.
+
+Nếu bước tạo key JSON báo **"An Organization Policy that blocks service
+accounts key creation..."**: tài khoản GCP đang nằm trong organization
+(Google Workspace) có policy `iam.disableServiceAccountKeyCreation` bật mặc
+định. Lối thoát nhanh nhất: tạo project bằng **Gmail cá nhân** (No
+organization) — project GCP không cần cùng tài khoản với Play Console, chỉ
+cần email service account được mời ở bước 4. Còn muốn giữ trong org thì phải
+tự cấp role Organization Policy Administrator rồi Override policy đó về Off
+cho project (IAM & Admin → Organization Policies → "Disable service account
+key creation").
 
 ⚠️ Play Console yêu cầu **bản AAB đầu tiên phải upload TAY** qua giao diện web
 (Internal testing → Create release) thì API mới dùng được. Lấy file để upload:
