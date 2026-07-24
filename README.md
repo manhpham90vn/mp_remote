@@ -14,6 +14,8 @@ chạy khắp mọi nơi** — từ Windows tới iPhone tới tab Chrome — kh
 |-----------|-------------|-------------|---------------|
 | **~3.5 ms** capture→hiển thị<br>(loopback, đo trên RTX 5070 Ti) | **Zero-copy VRAM**, HW encode+decode, 60 fps | **3 host + 6 client** từ một `core/` | **Một app / OS** — cắm là chạy |
 
+> **Mới:** iOS client đã chạy — xem video từ host Windows trên iPhone/iPad qua LAN hoặc Tailscale.
+
 ## 💡 Dùng để làm gì
 
 - **Làm việc từ xa** — mở Claude Code, VS Code, terminal trên PC ở nhà rồi code/chạy build
@@ -33,8 +35,9 @@ bản cài sẵn ở [Releases](https://github.com/manhpham90vn/Deskhub/releases
 |----------|:----:|:------:|-----------|
 | **Windows** | ✅ | ✅ | **Chạy thật 2 máy LAN + qua Tailscale** (Internet/NAT) — video + điều khiển |
 | **Android** | — | 🔶 | Stream video chạy (emulator ~33 fps); chưa gửi input |
+| **iOS** | — | 🔶 | Stream video chạy (SwiftUI + VideoToolbox); chưa gửi input |
 | **Web** | — | 📐 | Thiết kế xong, chưa code |
-| **macOS · Ubuntu · iOS** | ⬜ | ⬜ | Chưa bắt đầu |
+| **macOS · Ubuntu** | ⬜ | ⬜ | Chưa bắt đầu |
 
 Chi tiết giai đoạn + lộ trình từng nền tảng: [`docs/05-roadmap.md`](docs/05-roadmap.md).
 
@@ -67,7 +70,8 @@ core/            lõi dùng chung MỌI nền tảng (protocol, C++20 thuần, k
 platform/        lớp mỏng bọc header OS (Clock.h) — cái core không được chạm
 client/windows/  app Windows — một exe, cả hai vai (host + client)   ✅ bản tham chiếu
 client/android/  app Android — client-only (Kotlin + core C++)        🔶
-client/<macos|linux|ios|web>/   các nền tảng còn lại                  ⬜ / 📐 thiết kế
+client/ios/      app iOS — client-only (SwiftUI + core C++)          🔶
+client/<macos|linux|web>/   các nền tảng còn lại                     ⬜ / 📐 thiết kế
 docs/            tài liệu thiết kế (bắt đầu từ docs/README.md)
 ```
 

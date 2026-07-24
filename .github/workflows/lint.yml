@@ -1,7 +1,8 @@
 name: lint
 
-# Kiểm tra style, không build sản phẩm. Ba job độc lập chạy song song:
+# Kiểm tra style, không build sản phẩm. Bốn job độc lập chạy song song:
 #   cpp-format  — clang-format cho core/ platform/ client/ (theo .clang-format)
+#   swift       — swiftlint cho client/ios (Swift)
 #   kotlin      — ktlint cho tầng UI Kotlin (theo .editorconfig)
 #   android     — Android Lint (gradlew lint) trên module app
 on:
@@ -25,7 +26,8 @@ jobs:
       - name: clang-format check
         run: |
           files=$(find core platform client -type f \
-            \( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.cc' -o -name '*.c' \))
+            \( -name '*.h' -o -name '*.hpp' -o -name '*.cpp' -o -name '*.cc' -o -name '*.c' \
+               -o -name '*.mm' -o -name '*.m' \))
           echo "$files"
           clang-format --dry-run --Werror $files
 
@@ -42,6 +44,17 @@ jobs:
 
       - name: ktlint check
         run: ktlint "client/android/**/*.kt"
+
+  swift:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: SwiftLint check
+        run: swiftlint lint --strict client/ios/app/swift
 
   android:
     runs-on: ubuntu-latest

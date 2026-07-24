@@ -13,6 +13,7 @@ compile_commands.json
 .vs/
 .cache/
 *.user
+*.xcuserstate
 
 # ---- Compiled / linker artifacts (neu roi vai ra ngoai out/) ----
 *.obj
