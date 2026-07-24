@@ -1,0 +1,9 @@
+Deskhub is a remote desktop client. It connects DIRECTLY (peer-to-peer over UDP) to a free companion host application running on the user's own Windows PC. There is NO login and NO account — the demo user/password fields do not apply.
+
+HOW TO TEST:
+1. On a Windows 10/11 x64 PC connected to the same Wi-Fi/network as the iPhone, download the host app from https://github.com/manhpham90vn/Deskhub/releases (a single client.exe, no installation required).
+2. Run client.exe and accept the Windows Firewall prompt on first launch.
+3. In the iOS app, enter the PC's local IP address (shown by `ipconfig` on the PC) and tap Connect.
+4. The PC screen appears in the app: drag anywhere to move the mouse, tap to left-click, two-finger tap to right-click, hold then drag to select. Tap "Keys" to type with the keyboard; the bottom bar sends Esc/Tab/Enter/arrows/Del/Ctrl+C/Ctrl+V.
+
+NOTE FOR REVIEW: by design there are no Deskhub servers — the app only talks to the reviewer's/user's own Windows PC (see privacy policy), so a Windows PC is required to see the streaming and control features. If no Windows PC is available during review, contact us at manhpv151090@gmail.com and we will provide a temporary demo host reachable over Tailscale, including step-by-step instructions.
