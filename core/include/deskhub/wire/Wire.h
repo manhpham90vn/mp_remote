@@ -50,12 +50,22 @@ inline constexpr size_t kCommonHeaderSize = 8;
 inline constexpr size_t kVideoHeaderSize = 16;
 inline constexpr size_t kFecHeaderSize = 16;
 
-// FEC (GĐ5): mỗi kFecGroupSize gói video liên tiếp trong một frame được kèm MỘT gói
-// parity = XOR của cả nhóm. Mất đúng 1 gói trong nhóm thì khôi phục được, không phải
-// bỏ cả frame và xin IDR (IDR to gấp nhiều lần P-frame, mất gói lúc đang nghẽn mà
-// đáp bằng IDR là đổ thêm dầu vào lửa). Mất ≥2 gói cùng nhóm thì chịu, quay về
-// đường cũ. Chi phí băng thông = 1/kFecGroupSize.
+// FEC (GĐ5): mỗi frame video kèm các gói parity XOR để dựng lại gói mất mà không phải
+// bỏ cả frame và xin IDR (IDR to gấp nhiều lần P-frame; mất gói lúc đang nghẽn mà đáp
+// bằng IDR là đổ thêm dầu vào lửa).
+//
+// CHIA NHÓM XEN KẼ (interleaved). Frame N gói chia thành numGroups = ceil(N/kFecGroupSize)
+// nhóm; gói thứ i thuộc nhóm (i % numGroups) — KHÔNG phải các gói liên tiếp. Mỗi nhóm một
+// gói parity, dựng lại được ĐÚNG 1 gói mất trong nhóm. Vì hai gói cùng nhóm cách nhau
+// numGroups vị trí, một CHÙM mất tới numGroups gói LIÊN TIẾP chỉ đụng mỗi nhóm một gói →
+// vẫn cứu được trọn. Đây là điểm hơn hẳn cách gom liên tiếp trước đây (chùm ≥2 là chịu),
+// mà chi phí băng thông vẫn y hệt = 1/kFecGroupSize. Mất ≥2 gói CÙNG một nhóm thì vẫn chịu.
+// kFecGroupSize vì thế là cỡ nhóm mục tiêu (điều tiết overhead), numGroups là sức chịu chùm.
 inline constexpr uint16_t kFecGroupSize = 8;
+
+// groupIndex trên wire là u8 → tối đa 256 nhóm. Frame cần nhiều nhóm hơn (rất to) thì
+// Packetizer gửi trần, không FEC — xem Packetizer::SendFrame.
+inline constexpr size_t kMaxFecGroups = 256;
 
 // Parity phải XOR được cả ĐỘ DÀI (gói cuối frame ngắn hơn các gói khác), nên payload
 // của nó là 2 byte lenXor + dữ liệu XOR. Gói FEC vì thế chật hơn gói video thường →
@@ -69,6 +79,12 @@ inline constexpr size_t kInputEventSize = 19; // evType+ts+a+b+state+absolute
 // Số event tối đa nhét vừa một datagram (thực tế gửi ít hơn nhiều).
 inline constexpr size_t kMaxInputEvents =
     (kMaxDatagram - kCommonHeaderSize - kInputHeaderSize) / kInputEventSize; // 62
+
+// NACK (GĐ7): frameId(u32) + count(u8) + count×pktIndex(u16). Số chỉ số tối đa vừa một
+// datagram — thực tế client chỉ xin vài mảnh thiếu của frame đầu hàng.
+inline constexpr size_t kNackHeaderSize = 5; // frameId(u32) + count(u8)
+inline constexpr size_t kMaxNackIndices =
+    (kMaxDatagram - kCommonHeaderSize - kNackHeaderSize) / 2; // 593
 
 enum class Chan : uint8_t { Control = 0,
     Video = 1,
@@ -90,7 +106,9 @@ enum class MsgType : uint8_t {
     Feedback = 0x32,
     RequestKeyframe = 0x33,
     Reconfig = 0x34,
-    SetFocus = 0x35, // GĐ6: client báo cửa sổ preview của nguồn này vừa được focus
+    SetFocus = 0x35,      // GĐ6: client báo cửa sổ preview của nguồn này vừa được focus
+    Nack = 0x36,          // GĐ7: client xin host GỬI LẠI các mảnh video còn thiếu của 1 frame
+    InvalidateRef = 0x37, // GĐ7: client báo đã bỏ hẳn 1 frame → host đừng tham chiếu nó nữa
 };
 
 // Flags của VIDEO_PACKET
@@ -213,10 +231,11 @@ struct VideoPacketView {
     std::span<const uint8_t> payload;
 };
 
-// Gói parity. `groupIndex` thay cho pktIndex đầu nhóm: nhóm g phủ các gói
-// [g*kFecGroupSize, min((g+1)*kFecGroupSize, pktCount)) — suy được, khỏi tốn byte.
-// timestampUs/pktCount/idr đi kèm để khôi phục được cả frame chỉ có 1 gói (nhóm 1
-// phần tử: parity chính là bản sao gói đó).
+// Gói parity của một nhóm XEN KẼ. Với numGroups = ceil(pktCount/kFecGroupSize), nhóm
+// `groupIndex` phủ các gói { i : i % numGroups == groupIndex } = groupIndex, groupIndex +
+// numGroups, groupIndex + 2*numGroups, … — suy được từ pktCount, khỏi tốn byte trên wire.
+// timestampUs/pktCount/idr đi kèm để dựng được cả frame chỉ có 1 gói (nhóm 1 phần tử:
+// parity chính là bản sao gói đó).
 struct FecHeader {
     uint32_t frameId;
     uint64_t timestampUs;
@@ -248,6 +267,12 @@ size_t BuildReconfig(std::span<uint8_t> out, uint32_t sessionId, const Reconfig&
 // `focused` = 1: người dùng vừa chuyển sang xem/điều khiển nguồn này → host đưa cửa
 // sổ nguồn lên foreground. = 0: rời đi → host nhả hết phím đang giữ của phiên này.
 size_t BuildSetFocus(std::span<uint8_t> out, uint32_t sessionId, bool focused);
+// NACK: xin gửi lại các mảnh `indices` (pktIndex) của `frameId`. Trả 0 nếu indices rỗng,
+// quá kMaxNackIndices, hoặc out thiếu chỗ.
+size_t BuildNack(std::span<uint8_t> out, uint32_t sessionId, uint32_t frameId,
+    std::span<const uint16_t> indices);
+// INVALIDATE_REF: client đã bỏ hẳn `frameId` → host đừng dùng nó làm khung tham chiếu.
+size_t BuildInvalidateRef(std::span<uint8_t> out, uint32_t sessionId, uint32_t frameId);
 size_t BuildVideoPacket(std::span<uint8_t> out, uint32_t sessionId, const VideoHeader& vh,
     bool idr, bool frameEnd, std::span<const uint8_t> payload);
 // `parity` gồm cả 2 byte lenXor đứng đầu (xem FecPacketView).
@@ -272,6 +297,12 @@ std::optional<Feedback> ParseFeedback(std::span<const uint8_t> payload);
 std::optional<Reconfig> ParseReconfig(std::span<const uint8_t> payload);
 // true = xin focus, false = nhả. nullopt nếu payload rỗng.
 std::optional<bool> ParseSetFocus(std::span<const uint8_t> payload);
+// Giải mã NACK vào `out` (đủ chỗ cho kMaxNackIndices). Trả số chỉ số đã ghi và đặt
+// `frameId`; 0 nếu gói hỏng/rỗng/không khớp count.
+size_t ParseNack(std::span<const uint8_t> payload, uint32_t& frameId,
+    std::span<uint16_t> out);
+// Giải mã INVALIDATE_REF. nullopt nếu payload ngắn.
+std::optional<uint32_t> ParseInvalidateRef(std::span<const uint8_t> payload);
 std::optional<VideoPacketView> ParseVideoPacket(const CommonHeader& h,
     std::span<const uint8_t> payload);
 std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,

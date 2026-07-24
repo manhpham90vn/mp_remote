@@ -199,6 +199,18 @@ void ClientSession::SendFeedback(const Feedback& fb) {
     if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
 }
 
+void ClientSession::SendNack(uint32_t frameId, std::span<const uint16_t> indices) {
+    if (state_ != State::Streaming || indices.empty()) return;
+    const size_t n = BuildNack(buf_, sessionId_, frameId, indices);
+    if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
+}
+
+void ClientSession::SendInvalidateRef(uint32_t frameId) {
+    if (state_ != State::Streaming) return;
+    const size_t n = BuildInvalidateRef(buf_, sessionId_, frameId);
+    if (n && cb_.send) cb_.send(std::span<const uint8_t>(buf_, n));
+}
+
 void ClientSession::SendBye() {
     if (state_ == State::Starting || state_ == State::Streaming) {
         const size_t n = BuildBye(buf_, sessionId_);

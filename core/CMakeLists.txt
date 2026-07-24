@@ -16,6 +16,7 @@ add_library(core STATIC
 
     src/transport/Packetizer.cpp
     src/transport/Reassembler.cpp
+    src/transport/RetransmitCache.cpp
 
     src/session/HostSession.cpp
     src/session/ClientSession.cpp
@@ -45,8 +46,26 @@ endif()
 option(DESKHUB_CORE_TESTS "Build core_tests" ${deskhub_tests_default})
 
 if(DESKHUB_CORE_TESTS)
-    add_executable(core_tests tests/CoreTests.cpp)
+    # Test tách theo tầng, gương với cây src/: mỗi module một file, dùng chung
+    # tiện ích ở tests/support. TestMain gom lại và chạy tất cả.
+    add_executable(core_tests
+        tests/TestMain.cpp
+        tests/support/TestSupport.cpp
+
+        tests/wire/WireTests.cpp
+
+        tests/transport/ReassemblerTests.cpp
+        tests/transport/FecTests.cpp
+        tests/transport/RetransmitCacheTests.cpp
+
+        tests/session/SessionTests.cpp
+
+        tests/input/InputTests.cpp
+
+        tests/control/ControlTests.cpp
+    )
     target_link_libraries(core_tests PRIVATE core)
+    target_include_directories(core_tests PRIVATE tests)
     if(MSVC)
         target_compile_options(core_tests PRIVATE /W4 /permissive-)
     endif()

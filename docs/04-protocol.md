@@ -56,6 +56,25 @@ Sau header 8 byte là payload tùy `Type`.
 | 0x33 | REQUEST_KEYFRAME | control | C→A | có (retry) |
 | 0x34 | RECONFIG | control | A→C | có |
 | 0x35 | SET_FOCUS | control | C→A | phát lặp 3× |
+| 0x36 | NACK | control | C→A | không (best-effort) |
+| 0x37 | INVALIDATE_REF | control | C→A | không (best-effort) |
+
+## 3c. Gửi lại theo NACK và huỷ khung tham chiếu (GĐ7)
+
+Hai cơ chế phục hồi mất gói bù cho FEC XOR (chỉ cứu 1 mảnh/nhóm):
+
+**NACK (0x36).** Khi frame đầu hàng ở `Reassembler` còn thiếu mảnh sau một nhịp chờ
+(cho gói đảo thứ tự về), client gửi NACK liệt kê các `pktIndex` thiếu; host tra
+`RetransmitCache` (kho các datagram video vừa phát) và gửi lại đúng các mảnh đó. Cứu
+được **mọi** kiểu mất — kể cả chùm mà FEC chịu chết — nếu RTT đủ nhỏ để gói gửi lại về
+trước hạn ghép (2 khoảng frame). Chỉ tốn băng thông khi thật sự mất gói, khác FEC luôn
+tốn 1/8. Client tự điều tiết: không xin lại cùng frame trong vòng ~max(RTT, 10ms).
+Định dạng: `frameId(u32) count(u8)` rồi `count × pktIndex(u16)`.
+
+**INVALIDATE_REF (0x37).** Client báo đã bỏ hẳn một `frameId(u32)` để host thôi tham
+chiếu nó (phục hồi bằng P-frame rẻ thay vì IDR nặng). Giao thức và định tuyến đã có
+trong core; phần encoder (NVENC reference-invalidation / intra-refresh) còn chờ nối và
+kiểm chứng trên phần cứng.
 
 ## 3b. Nhiều nguồn trên một host (GĐ6)
 
@@ -171,9 +190,14 @@ Một frame nén có thể lớn hơn MTU → cắt thành nhiều gói. Header 
 
 ## 5b. Kênh FEC (FEC_PACKET, 0x11) — GĐ5
 
-Mỗi **8 gói video liên tiếp** trong một frame (`kFecGroupSize`) được kèm MỘT gói parity
-= XOR của cả nhóm. Mất đúng 1 gói trong nhóm → client dựng lại được, không phải bỏ frame
-và xin IDR. Mất ≥2 gói cùng nhóm → parity vô dụng, quay về chính sách §5.
+**Nhóm XEN KẼ (interleaved).** Frame `N` gói được chia thành `numGroups = ceil(N/8)`
+nhóm (`kFecGroupSize = 8`); gói thứ `i` thuộc nhóm `i % numGroups` — **không** phải các
+gói liên tiếp. Mỗi nhóm kèm MỘT gói parity = XOR của cả nhóm. Mất đúng 1 gói trong một
+nhóm → client dựng lại được, không phải bỏ frame và xin IDR. Vì hai gói cùng nhóm cách
+nhau `numGroups` vị trí, một **chùm mất tới `numGroups` gói liên tiếp** chỉ đụng mỗi nhóm
+một gói nên vẫn cứu được trọn — đây là điểm hơn hẳn cách gom liên tiếp trước đây (chùm ≥2
+là chịu), mà chi phí băng thông vẫn = 1/8. Mất ≥2 gói **cùng một nhóm** → parity vô dụng,
+quay về chính sách §5.
 
 ```
 +--------+--------+--------+--------+--------+--------+--------+--------+
@@ -187,7 +211,7 @@ và xin IDR. Mất ≥2 gói cùng nhóm → parity vô dụng, quay về chính
 | Trường | Kiểu | Ý nghĩa |
 |--------|------|---------|
 | frameId / timestampUs / pktCount | | Như VIDEO_PACKET — đủ để dựng lại frame chỉ có 1 gói. |
-| grpIdx | u8 | Nhóm phủ các mảnh `[grpIdx*8, min((grpIdx+1)*8, pktCount))`. |
+| grpIdx | u8 | Nhóm xen kẽ: phủ các mảnh `{ i : i % numGroups == grpIdx }` với `numGroups = ceil(pktCount/8)` → `grpIdx, grpIdx+numGroups, grpIdx+2·numGroups, …`. Tối đa 256 nhóm (grpIdx là u8). |
 | rsv | u8 | Dự trữ, phải bằng 0. |
 | lenXor | u16 | XOR **độ dài** các mảnh trong nhóm — mảnh cuối frame ngắn hơn, không có trường này thì không biết cắt ở đâu. |
 

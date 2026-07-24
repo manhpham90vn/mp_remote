@@ -123,6 +123,13 @@ public:
     // chưa STREAMING.
     void SendFeedback(const Feedback& fb);
 
+    // Gửi NACK xin host gửi lại các mảnh `indices` của `frameId` (GĐ7). Caller lấy
+    // danh sách từ Reassembler::PlanNack. Bỏ qua nếu chưa STREAMING hoặc indices rỗng.
+    void SendNack(uint32_t frameId, std::span<const uint16_t> indices);
+
+    // Báo host đã bỏ hẳn `frameId` để nó thôi tham chiếu (GĐ7). Bỏ qua nếu chưa STREAMING.
+    void SendInvalidateRef(uint32_t frameId);
+
     // Báo host mình rời đi (gửi 1 lần, best-effort) và kết thúc phiên.
     void SendBye();
 

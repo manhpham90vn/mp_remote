@@ -1,29 +1,29 @@
 // =============================================================================
-// Packetizer.cpp — cài đặt SendFrame: cắt mảnh, phát gói, tích luỹ parity FEC.
+// Packetizer.cpp — cài đặt SendFrame: cắt mảnh, phát gói, tích luỹ parity FEC xen kẽ.
 //
-// File chỉ có một hàm, nhưng nó gánh hai việc đan xen nhau trong cùng một vòng lặp:
+// File chỉ có một hàm, gánh hai việc:
 //
-//   1. CẮT VÀ PHÁT. Frame được chia thành các mảnh kMaxVideoPayload byte, mảnh
-//      cuối lấy phần dư. Mỗi mảnh thành một datagram VIDEO_PACKET gửi ngay.
+//   1. CẮT VÀ PHÁT. Frame chia thành các mảnh kMaxVideoPayload byte (mảnh cuối lấy
+//      phần dư), mỗi mảnh thành một datagram VIDEO_PACKET gửi ngay trong vòng lặp.
 //
-//   2. TÍCH LUỸ PARITY (nếu bật FEC). Cứ kFecGroupSize mảnh liên tiếp thì XOR lại
-//      với nhau thành một gói parity, phát ngay sau mảnh cuối của nhóm. Mất đúng
-//      một mảnh trong nhóm thì bên nhận dựng lại được bằng phép XOR ngược.
+//   2. TÍCH LUỸ PARITY XEN KẼ (nếu bật FEC). numGroups = ceil(count/kFecGroupSize)
+//      nhóm; mảnh thứ i góp vào parity của nhóm (i % numGroups). Vì các nhóm đan xen
+//      nhau, chúng chỉ đóng lại ở CUỐI frame — nên vòng lặp giữ numGroups bộ tích luỹ
+//      song song, rồi phát một loạt gói parity sau khi mọi mảnh dữ liệu đã đi. Mất
+//      đúng một mảnh trong một nhóm thì bên nhận dựng lại được bằng XOR ngược; chùm
+//      mất liên tiếp trải ra nhiều nhóm nên vẫn cứu được (xem Wire.h).
 //
-// Hai việc này nằm chung một vòng lặp thay vì tách hai lượt vì frame có thể nặng
-// vài chục KB: lặp hai lượt nghĩa là đọc lại toàn bộ dữ liệu lần nữa, trên đường
-// nóng chạy 60 lần mỗi giây.
+// Vẫn CHỈ MỘT LƯỢT đọc dữ liệu: XOR góp vào bộ tích luỹ của nhóm ngay khi cắt mảnh,
+// không đọc lại frame lần hai (frame có thể vài chục KB, chạy 60 lần/giây).
 //
-// VÌ SAO KHÔNG CẤP PHÁT GÌ Ở ĐÂY
-//   Hàm này chạy mỗi frame, tức 60 lần/giây với mỗi lần vài chục datagram. Bộ đệm
-//   buf_ và parity_ là thành viên của lớp, dùng lại qua từng lần gọi; không có
-//   std::vector nào được tạo trên đường này.
+// VỀ CẤP PHÁT
+//   buf_ là mảng thành viên cố định. parity_ là vector thành viên, assign() mỗi frame
+//   tái dùng sức chứa nên chỉ cấp phát khi gặp frame lớn hơn mọi frame trước — steady
+//   state không cấp phát trên đường nóng.
 //
 // LIÊN QUAN: deskhub/transport/Packetizer.h (thiết kế + lý do), Reassembler.cpp (đầu kia)
 // =============================================================================
 #include "deskhub/transport/Packetizer.h"
-
-#include <cstring>
 
 namespace deskhub {
 
@@ -33,32 +33,20 @@ size_t Packetizer::SendFrame(std::span<const uint8_t> nal, uint32_t frameId,
     // Phép chia làm tròn LÊN: mảnh cuối thường không đầy nhưng vẫn tính là một mảnh.
     const size_t count = (nal.size() + kMaxVideoPayload - 1) / kMaxVideoPayload;
     if (count > 0xFFFF) return 0; // pktIndex/pktCount là u16 — không đánh số nổi
-    // groupIndex là u8: quá 256 nhóm thì không đánh số được → gửi trần, không FEC.
-    const bool fec = fec_ && (count + kFecGroupSize - 1) / kFecGroupSize <= 256;
+    // Nhóm xen kẽ: numGroups = ceil(count/kFecGroupSize), gói i thuộc nhóm (i % numGroups).
+    // groupIndex là u8: quá kMaxFecGroups nhóm thì không đánh số được → gửi trần, không FEC.
+    const size_t numGroups = (count + kFecGroupSize - 1) / kFecGroupSize;
+    const bool fec = fec_ && numGroups <= kMaxFecGroups;
 
     VideoHeader vh;
     vh.frameId = frameId;
     vh.timestampUs = timestampUs;
     vh.pktCount = uint16_t(count);
 
-    FecHeader fh;
-    fh.frameId = frameId;
-    fh.timestampUs = timestampUs;
-    fh.pktCount = uint16_t(count);
-
-    // Parity đi SAU cả nhóm: gửi trước thì nó tới trước gói dữ liệu và bên nhận phải
-    // giữ chỗ chờ; gửi sau thì lúc nó tới ta đã biết chính xác còn thiếu gói nào.
-    auto flushParity = [&](size_t groupIdx) -> bool {
-        fh.groupIndex = uint8_t(groupIdx);
-        const size_t n = BuildFecPacket(buf_, sessionId_, fh, idr,
-            std::span<const uint8_t>(parity_, sizeof(parity_)));
-        if (!n) return false;
-        send(std::span<const uint8_t>(buf_, n));
-        return true;
-    };
-
-    // Phần tử trung hoà của XOR là 0, nên nhóm mới luôn bắt đầu từ bộ đệm sạch.
-    if (fec) std::memset(parity_, 0, sizeof(parity_));
+    // numGroups bộ tích luỹ liền nhau trong parity_; bộ của nhóm g bắt đầu ở g*stride.
+    // assign() vừa cấp đủ chỗ (tái dùng sức chứa) vừa đặt lại 0 — phần tử trung hoà của
+    // XOR là 0 nên mọi nhóm bắt đầu từ nền sạch.
+    if (fec) parity_.assign(numGroups * kParityStride, 0);
 
     for (size_t i = 0; i < count; ++i) {
         // Vị trí mảnh suy từ chỉ số vì mọi mảnh trừ mảnh cuối đều dài bằng nhau —
@@ -74,21 +62,31 @@ size_t Packetizer::SendFrame(std::span<const uint8_t> nal, uint32_t frameId,
         send(std::span<const uint8_t>(buf_, n));
 
         if (!fec) continue;
-        // XOR cả độ dài lẫn dữ liệu. Chỉ gói cuối frame ngắn hơn kMaxVideoPayload,
-        // nhưng bên nhận không đoán được độ dài gói THIẾU nếu không có lenXor.
-        parity_[0] ^= uint8_t(len >> 8);
-        parity_[1] ^= uint8_t(len & 0xFF);
+        // Cộng mảnh vào parity của NHÓM XEN KẼ của nó. XOR cả độ dài lẫn dữ liệu: chỉ
+        // gói cuối frame ngắn hơn kMaxVideoPayload, mà bên nhận không đoán được độ dài
+        // gói THIẾU nếu không có lenXor.
+        uint8_t* par = parity_.data() + (i % numGroups) * kParityStride;
+        par[0] ^= uint8_t(len >> 8);
+        par[1] ^= uint8_t(len & 0xFF);
         for (size_t b = 0; b < len; ++b)
-            parity_[kFecLenPrefix + b] ^= nal[off + b];
+            par[kFecLenPrefix + b] ^= nal[off + b];
+    }
 
-        // Nhóm đóng lại khi đủ kFecGroupSize mảnh, HOẶC khi frame hết — nhóm cuối
-        // của frame thường không đầy, và parity của nhóm lẻ đó vẫn có ích (nhóm một
-        // phần tử thì parity đúng bằng bản sao của mảnh đó).
-        const bool groupEnd = ((i + 1) % kFecGroupSize == 0) || frameEnd;
-        if (groupEnd) {
-            if (!flushParity(i / kFecGroupSize)) return 0;
-            std::memset(parity_, 0, sizeof(parity_));
-        }
+    if (!fec) return count;
+
+    // Parity đi SAU toàn bộ dữ liệu: nhóm xen kẽ chỉ đóng lại khi mảnh cuối cùng của
+    // frame đã đi, và gửi sau thì lúc parity tới bên nhận đã biết chính xác còn thiếu
+    // gói nào. Một gói parity cho mỗi nhóm.
+    FecHeader fh;
+    fh.frameId = frameId;
+    fh.timestampUs = timestampUs;
+    fh.pktCount = uint16_t(count);
+    for (size_t g = 0; g < numGroups; ++g) {
+        fh.groupIndex = uint8_t(g);
+        const size_t n = BuildFecPacket(buf_, sessionId_, fh, idr,
+            std::span<const uint8_t>(parity_.data() + g * kParityStride, kParityStride));
+        if (!n) return 0;
+        send(std::span<const uint8_t>(buf_, n));
     }
     return count;
 }

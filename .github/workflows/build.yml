@@ -13,10 +13,31 @@ on:
 
 jobs:
   # ---------------------------------------------------------------------------
+  # Core tests: lõi thuần C++20, offline (không mạng/GPU/submodule) nên build nhanh
+  # bằng gcc trên Ubuntu và chạy qua CTest. Đây là tín hiệu pass/fail ĐỘC LẬP với
+  # bản dựng artifact — chạy trước, thấy đỏ là biết ngay lỗi ở logic lõi chứ không
+  # phải ở toolchain Windows/Android.
+  # ---------------------------------------------------------------------------
+  core-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4   # không cần submodule: core không đụng nvenc
+
+      - name: Configure core (standalone)
+        run: cmake -S core -B build-core -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build core_tests
+        run: cmake --build build-core --target core_tests
+
+      - name: Run core tests (CTest, offline)
+        run: ctest --test-dir build-core --output-on-failure
+
+  # ---------------------------------------------------------------------------
   # Windows: một exe duy nhất (host + client). Build preset Release bằng Ninja +
-  # MSVC, chạy luôn core_tests trước khi xuất artifact.
+  # MSVC, chạy lại core_tests trên chính toolchain đó trước khi xuất artifact.
   # ---------------------------------------------------------------------------
   windows:
+    needs: core-tests
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -37,8 +58,8 @@ jobs:
       - name: Build
         run: cmake --build --preset x64-release
 
-      - name: Run core tests
-        run: out/build/x64-release/core/core_tests.exe
+      - name: Run core tests (CTest, offline)
+        run: ctest --test-dir out/build/x64-release --output-on-failure
 
       - name: Upload exe
         uses: actions/upload-artifact@v4

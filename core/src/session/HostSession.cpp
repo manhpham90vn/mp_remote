@@ -106,6 +106,22 @@ bool HostSession::HandlePacket(std::span<const uint8_t> pkt, uint64_t nowUs) {
             if (m && cb_.onFeedback) cb_.onFeedback(*m);
             return true; // gói vẫn nuôi timeout kể cả khi payload hỏng
         }
+        case MsgType::Nack: {
+            if (state() != State::Streaming || h->sessionId != sessionId()) return false;
+            lastRecvUs_ = nowUs;
+            uint16_t idx[kMaxNackIndices];
+            uint32_t frameId = 0;
+            const size_t n = ParseNack(payload, frameId, idx);
+            if (n && cb_.onNack) cb_.onNack(frameId, std::span<const uint16_t>(idx, n));
+            return true;
+        }
+        case MsgType::InvalidateRef: {
+            if (state() != State::Streaming || h->sessionId != sessionId()) return false;
+            lastRecvUs_ = nowUs;
+            const auto fid = ParseInvalidateRef(payload);
+            if (fid && cb_.onInvalidateRef) cb_.onInvalidateRef(*fid);
+            return true;
+        }
         case MsgType::Bye:
             if (state() == State::Idle || h->sessionId != sessionId()) return false;
             Disconnect();

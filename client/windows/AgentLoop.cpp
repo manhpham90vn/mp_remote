@@ -70,6 +70,7 @@
 #include "deskhub/control/BitrateController.h"
 #include "deskhub/session/HostSession.h"
 #include "deskhub/transport/Packetizer.h"
+#include "deskhub/transport/RetransmitCache.h"
 
 namespace {
 
@@ -129,6 +130,11 @@ struct SourcePipeline {
     std::unique_ptr<deskhub::HostSession> session; // tạo sau khi biết kích thước nguồn
     deskhub::StreamParams offer;                   // chỉ thread Recv chạm
     deskhub::Packetizer packetizer;                // chỉ thread FrameArrived chạm
+
+    // GĐ7 NACK: kho các datagram video vừa phát, để gửi lại khi client xin. Store từ
+    // thread FrameArrived (đường phát), Find từ thread Recv (xử lý NACK) → khoá chung.
+    deskhub::RetransmitCache retxCache;
+    std::mutex retxMutex;
 
     // --- Chia sẻ giữa thread FrameArrived và thread Recv ---
     std::atomic<uint32_t> srcW{0}, srcH{0};       // kích thước NÉN (đã làm chẵn)
@@ -355,6 +361,9 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
                         p->bytesSent.fetch_add(d.size(), std::memory_order_relaxed);
                     else
                         p->dgSendFail.fetch_add(1, std::memory_order_relaxed);
+                    // GĐ7: giữ bản sao để gửi lại nếu client NACK (Store tự bỏ gói FEC).
+                    std::lock_guard<std::mutex> lk(p->retxMutex);
+                    p->retxCache.Store(d);
                 });
             const uint32_t burstMs = uint32_t((NowUs() - sendT0) / 1000);
             DiagAtomicMax(p->dgBurstMsMax, burstMs);
@@ -581,6 +590,19 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
             std::printf("[Agent][%s] Client START — beginning video push.\n", p->name.c_str());
         };
         cb.onKeyframeRequest = [p] { p->forceIdr.store(true); };
+        // GĐ7: client xin gửi lại các mảnh còn thiếu của một frame. Tra kho rồi phát
+        // lại thẳng cho peer hiện tại. Rẻ hơn nhiều so với ép cả một IDR, và chỉ tốn
+        // băng thông đúng lúc thật sự mất gói. Chạy trên thread Recv.
+        cb.onNack = [p, &sock](uint32_t frameId, std::span<const uint16_t> indices) {
+            const uint64_t pp = p->peerPacked.load(std::memory_order_acquire);
+            if (!pp) return;
+            const NetAddr peer = NetAddr::Unpack(pp);
+            std::lock_guard<std::mutex> lk(p->retxMutex);
+            for (uint16_t idx : indices) {
+                const auto d = p->retxCache.Find(frameId, idx);
+                if (!d.empty()) sock.SendTo(peer, d.data(), d.size());
+            }
+        };
         cb.onInput = [p](const deskhub::InputEvent& e) { p->injector.Apply(e); };
         // Client chuyển cửa sổ preview -> kéo đúng cửa sổ nguồn đó lên foreground.
         // Chia sẻ nhiều nguồn thì chỉ một cửa sổ được foreground, mà SendInput bơm
@@ -602,6 +624,10 @@ int RunAgent(std::span<const AgentSource> sources, const AgentOptions& opt) {
         cb.onDisconnect = [p] {
             p->peerPacked.store(0, std::memory_order_release);
             p->injector.ReleaseAll(); // mất kết nối giữa lúc giữ phím = kẹt phím
+            {
+                std::lock_guard<std::mutex> lk(p->retxMutex);
+                p->retxCache.Reset(); // phiên sau không gửi lại gói của phiên trước
+            }
             std::printf("[Agent][%s] Client left (BYE/timeout).\n", p->name.c_str());
         };
         // GD5 congestion control, RIÊNG từng nguồn: hai nguồn có thể đi cùng một

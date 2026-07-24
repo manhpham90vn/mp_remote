@@ -23,11 +23,14 @@
 //      bỏ quá sớm thì phí một frame lẽ ra cứu được. Cân bằng này là phần "Chính
 //      sách v1" ngay bên dưới.
 //
-// KHÔI PHỤC BẰNG FEC
-//   Nếu host bật FEC, mỗi nhóm kFecGroupSize mảnh có kèm một gói parity. Thiếu
-//   ĐÚNG một mảnh trong nhóm thì TryRecover dựng lại được bằng XOR ngược — frame
-//   vẫn hoàn chỉnh, không phải bỏ và không phải xin IDR. Thiếu từ hai mảnh trở lên
-//   thì parity vô dụng (một phương trình không giải nổi hai ẩn).
+// KHÔI PHỤC BẰNG FEC (nhóm XEN KẼ)
+//   Nếu host bật FEC, frame chia thành numGroups = ceil(pktCount/kFecGroupSize) nhóm
+//   xen kẽ (gói i thuộc nhóm i % numGroups), mỗi nhóm kèm một gói parity. Thiếu ĐÚNG
+//   một mảnh trong một nhóm thì TryRecover dựng lại được bằng XOR ngược — frame vẫn
+//   hoàn chỉnh, không phải bỏ và không phải xin IDR. Vì các gói cùng nhóm cách nhau
+//   numGroups vị trí, một chùm mất tới numGroups gói liên tiếp chỉ đụng mỗi nhóm một
+//   gói nên vẫn cứu được. Thiếu ≥2 mảnh CÙNG một nhóm thì parity vô dụng (một phương
+//   trình không giải nổi hai ẩn).
 //
 // VÌ SAO PHẢI CHỜ IDR SAU KHI MẤT FRAME
 //   Encoder dùng GOP vô hạn (không tự phát IDR định kỳ, vì IDR nặng gấp nhiều lần
@@ -148,6 +151,13 @@ public:
     // Frame kế tiếp theo thứ tự nếu đã đủ mảnh (gọi lặp tới khi trả nullopt).
     std::optional<Frame> PopReady(uint64_t nowUs);
 
+    // Lập một yêu cầu NACK (GĐ7): liệt kê pktIndex còn thiếu của frame CŨ NHẤT đang dở
+    // vào `out` và đặt `frameId`. Trả số chỉ số (0 = chưa nên xin lúc này). Caller gói
+    // bằng BuildNack rồi gửi cho host. Tự điều tiết: chờ kNackHoldUs cho gói đảo thứ tự
+    // về đã (khỏi xin thừa), và không xin lại cùng frame trong vòng max(rttUs, sàn) —
+    // gói gửi lại cần ~1 RTT mới tới. `rttUs` lấy từ ClientSession::lastRttUs (0 nếu chưa đo).
+    size_t PlanNack(uint64_t nowUs, uint64_t rttUs, uint32_t& frameId, std::span<uint16_t> out);
+
     // true đúng MỘT lần sau mỗi đợt bỏ frame — caller xin keyframe.
     bool TakeLossEvent();
 
@@ -180,6 +190,7 @@ private:
         uint64_t timestampUs = 0;
         bool idr = false;
         uint64_t firstSeenUs = 0;
+        uint64_t lastNackUs = 0; // lần gần nhất đã xin gửi lại frame này (GĐ7)
         size_t bytes = 0;
         bool Complete() const {
             return pktCount != 0 && received == pktCount;
@@ -196,6 +207,13 @@ private:
     void NoteLatePacket(uint32_t id, uint64_t nowUs);
 
     static constexpr size_t kMaxPendingFrames = 4;
+
+    // NACK (GĐ7). Chờ chừng này trước khi kết luận một mảnh là MẤT chứ không chỉ tới
+    // muộn/đảo thứ tự — NACK ngay khi thấy hụt thì gửi lại thừa cho gói đang trên đường.
+    static constexpr uint64_t kNackHoldUs = 2'000;
+    // Sàn giãn cách giữa hai lần xin lại cùng một frame (dùng khi RTT rất nhỏ, LAN):
+    // gói gửi lại cần ~1 RTT mới về, xin lại sớm hơn chỉ nhân đôi lưu lượng.
+    static constexpr uint64_t kNackMinIntervalUs = 10'000;
 
     PendingMap pending_;
     uint64_t frameIntervalUs_;

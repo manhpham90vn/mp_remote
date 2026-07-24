@@ -86,8 +86,10 @@ void Reassembler::Push(const VideoPacketView& pkt, uint64_t nowUs) {
     f.idr = f.idr || pkt.idr;
     ++f.received;
 
-    // Gói này có thể là mảnh cuối nhóm cần để parity (đã tới trước) dùng được.
-    TryRecover(f, uint8_t(pkt.hdr.pktIndex / kFecGroupSize));
+    // Gói này có thể là mảnh cuối một nhóm cần để parity (đã tới trước) dùng được.
+    // Nhóm xen kẽ: gói pktIndex thuộc nhóm (pktIndex % numGroups).
+    const size_t numGroups = (size_t(f.pktCount) + kFecGroupSize - 1) / kFecGroupSize;
+    if (numGroups) TryRecover(f, uint8_t(pkt.hdr.pktIndex % numGroups));
 }
 
 // Nhận một gói parity. Đếm riêng vào fecReceived chứ KHÔNG cộng vào
@@ -122,14 +124,13 @@ bool Reassembler::TryRecover(Pending& f, uint8_t group) {
     if (pit == f.parity.end()) return false;
     const std::vector<uint8_t>& par = pit->second;
 
-    const size_t first = size_t(group) * kFecGroupSize;
-    if (first >= f.pktCount) return false;
-    size_t last = first + kFecGroupSize;
-    if (last > f.pktCount) last = f.pktCount;
+    // Nhóm xen kẽ `group` phủ các gói group, group+numGroups, group+2*numGroups, …
+    const size_t numGroups = (size_t(f.pktCount) + kFecGroupSize - 1) / kFecGroupSize;
+    if (numGroups == 0 || group >= numGroups) return false;
 
     // Parity XOR chỉ gỡ được MỘT ẩn số. Không thiếu gói nào thì thôi, thiếu ≥2 thì chịu.
     size_t missing = 0, missingIdx = 0;
-    for (size_t i = first; i < last; ++i)
+    for (size_t i = group; i < f.pktCount; i += numGroups)
         if (f.pieces[i].empty()) {
             ++missing;
             missingIdx = i;
@@ -138,9 +139,13 @@ bool Reassembler::TryRecover(Pending& f, uint8_t group) {
 
     // XOR ngược: parity ^ (mọi mảnh đã có) = mảnh thiếu, kèm 2 byte độ dài đứng đầu.
     std::vector<uint8_t> rec(par);
-    for (size_t i = first; i < last; ++i) {
+    for (size_t i = group; i < f.pktCount; i += numGroups) {
         if (i == missingIdx) continue;
         const auto& p = f.pieces[i];
+        // Phòng thủ tầng hai (Wire đã chặn kích thước từng gói): mảnh dài hơn phần
+        // dữ liệu của parity nghĩa là hai gói không cùng một nhóm hợp lệ — XOR tiếp
+        // sẽ ghi ra ngoài `rec`. Bỏ khôi phục, coi như nhóm này không cứu được.
+        if (kFecLenPrefix + p.size() > rec.size()) return false;
         rec[0] ^= uint8_t(p.size() >> 8);
         rec[1] ^= uint8_t(p.size() & 0xFF);
         for (size_t b = 0; b < p.size(); ++b) rec[kFecLenPrefix + b] ^= p[b];
@@ -210,6 +215,33 @@ std::optional<Reassembler::Frame> Reassembler::PopReady(uint64_t nowUs) {
         return std::nullopt; // còn hy vọng mảnh thiếu đang trên đường tới
     }
     return std::nullopt;
+}
+
+// Lập yêu cầu NACK cho frame CŨ NHẤT còn dở. Xem lý do các mốc thời gian ở đầu file
+// và ở Reassembler.h. Không đổi chính sách bỏ frame: NACK là best-effort chồng lên
+// trên, gói gửi lại về kịp hạn ghép thì frame cứu được, không kịp thì Drop như cũ.
+size_t Reassembler::PlanNack(uint64_t nowUs, uint64_t rttUs, uint32_t& frameId,
+    std::span<uint16_t> out) {
+    if (out.empty()) return 0;
+    for (auto& [id, f] : pending_) { // map: begin() là frame cũ nhất
+        if (f.Complete()) continue;
+        // Frame sắp bị bỏ vì quá hạn ghép: gửi lại cũng không về kịp → thôi.
+        if (nowUs - f.firstSeenUs >= 2 * frameIntervalUs_) continue;
+        // Cho gói đảo thứ tự một nhịp trước khi kết luận là mất.
+        if (nowUs - f.firstSeenUs < kNackHoldUs) return 0;
+        // Đừng xin lại quá dày: gói gửi lại cần ~1 RTT mới về.
+        const uint64_t interval = rttUs > kNackMinIntervalUs ? rttUs : kNackMinIntervalUs;
+        if (f.lastNackUs && nowUs - f.lastNackUs < interval) return 0;
+
+        size_t n = 0;
+        for (uint16_t i = 0; i < f.pktCount && n < out.size(); ++i)
+            if (f.pieces[i].empty()) out[n++] = i;
+        if (n == 0) return 0; // chưa Complete mà không thiếu gì: không xảy ra, thủ sẵn
+        f.lastNackUs = nowUs;
+        frameId = id;
+        return n;
+    }
+    return 0;
 }
 
 bool Reassembler::TakeLossEvent() {

@@ -437,6 +437,16 @@ void ClientLoop::NetThread() {
         if (decodeFailed_.exchange(false, std::memory_order_acq_rel)) requestKf("dec_fail");
         if (queueOverflow_.exchange(false, std::memory_order_acq_rel)) requestKf("q_overflow");
 
+        // GĐ7: xin host gửi lại các mảnh còn thiếu của frame đầu hàng (NACK). Bù cho
+        // FEC khi chùm mất vượt sức parity mà RTT còn đủ nhỏ để gói gửi lại về kịp.
+        if (reasm) {
+            uint16_t nackIdx[64];
+            uint32_t nackFrame = 0;
+            const size_t nn = reasm->PlanNack(now, minRttUs_.load(std::memory_order_relaxed),
+                nackFrame, nackIdx);
+            if (nn) session.SendNack(nackFrame, std::span<const uint16_t>(nackIdx, nn));
+        }
+
         session.Tick(now);
         if (session.state() == deskhub::ClientSession::State::Dead) break;
 

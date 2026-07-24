@@ -5,7 +5,8 @@
 //   Chuyển qua lại giữa struct trong bộ nhớ và chuỗi byte trên đường truyền.
 //   Mỗi hàm Build* có đúng một hàm Parse* đối xứng; hai bên PHẢI khớp nhau về
 //   thứ tự và độ rộng từng trường, nên chúng được đặt cạnh nhau theo cặp và mọi
-//   thay đổi phải sửa cả hai cùng lúc (CoreTests.cpp có test khứ hồi cho từng cặp).
+//   thay đổi phải sửa cả hai cùng lúc (core/tests/wire/WireTests.cpp có test khứ
+//   hồi cho từng cặp).
 //
 // BỐ CỤC FILE
 //   1. namespace vô danh — tiện ích nội bộ: WriteCommon, BuildEmpty,
@@ -201,6 +202,32 @@ size_t BuildSetFocus(std::span<uint8_t> out, uint32_t sessionId, bool focused) {
     const size_t total = WriteCommon(out, MsgType::SetFocus, 0, Chan::Control, sessionId, 1);
     if (!total) return 0;
     out[kCommonHeaderSize] = focused ? 1 : 0;
+    return total;
+}
+
+// NACK: xin host gửi lại các mảnh còn thiếu. Đi trên kênh Control như FEEDBACK —
+// client→host, best-effort. Định dạng: frameId(4) count(1) rồi count × pktIndex(2).
+size_t BuildNack(std::span<uint8_t> out, uint32_t sessionId, uint32_t frameId,
+    std::span<const uint16_t> indices) {
+    if (indices.empty() || indices.size() > kMaxNackIndices) return 0;
+    const size_t payload = kNackHeaderSize + indices.size() * 2;
+    const size_t total = WriteCommon(out, MsgType::Nack, 0, Chan::Control, sessionId, payload);
+    if (!total) return 0;
+    uint8_t* p = out.data() + kCommonHeaderSize;
+    PutU32(p, frameId);
+    p[4] = uint8_t(indices.size());
+    uint8_t* q = p + kNackHeaderSize;
+    for (uint16_t idx : indices) {
+        PutU16(q, idx);
+        q += 2;
+    }
+    return total;
+}
+
+size_t BuildInvalidateRef(std::span<uint8_t> out, uint32_t sessionId, uint32_t frameId) {
+    const size_t total = WriteCommon(out, MsgType::InvalidateRef, 0, Chan::Control, sessionId, 4);
+    if (!total) return 0;
+    PutU32(out.data() + kCommonHeaderSize, frameId);
     return total;
 }
 
@@ -401,9 +428,34 @@ std::optional<bool> ParseSetFocus(std::span<const uint8_t> payload) {
     return payload[0] != 0;
 }
 
+// Đối xứng với BuildNack. `count` do bên gửi khai nên phải đối chiếu với độ dài THẬT
+// của payload trước khi lặp, và kẹp về sức chứa của `out` — giống ParseInputEvents.
+size_t ParseNack(std::span<const uint8_t> payload, uint32_t& frameId,
+    std::span<uint16_t> out) {
+    if (payload.size() < kNackHeaderSize) return 0;
+    const uint8_t* p = payload.data();
+    size_t count = p[4];
+    if (count == 0) return 0;
+    if (payload.size() < kNackHeaderSize + count * 2) return 0; // gói cụt / khai điêu
+    if (count > out.size()) count = out.size();
+    frameId = GetU32(p);
+    const uint8_t* q = p + kNackHeaderSize;
+    for (size_t i = 0; i < count; ++i) out[i] = GetU16(q + i * 2);
+    return count;
+}
+
+std::optional<uint32_t> ParseInvalidateRef(std::span<const uint8_t> payload) {
+    if (payload.size() < 4) return std::nullopt;
+    return GetU32(payload.data());
+}
+
 std::optional<VideoPacketView> ParseVideoPacket(const CommonHeader& h,
     std::span<const uint8_t> payload) {
     if (payload.size() < kVideoHeaderSize) return std::nullopt;
+    // Cận TRÊN cũng phải chặn: Packetizer không bao giờ phát mảnh quá kMaxVideoPayload,
+    // nên mảnh quá khổ là gói dựng ác ý. Nhận vào sẽ thành mảnh ghép quá dài và làm
+    // TryRecover ghi tràn bộ đệm parity khi XOR (parity chỉ rộng kMaxVideoPayload).
+    if (payload.size() > kVideoHeaderSize + kMaxVideoPayload) return std::nullopt;
     const uint8_t* p = payload.data();
     VideoPacketView v;
     v.hdr.frameId = GetU32(p);
@@ -420,6 +472,10 @@ std::optional<VideoPacketView> ParseVideoPacket(const CommonHeader& h,
 std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,
     std::span<const uint8_t> payload) {
     if (payload.size() < kFecHeaderSize + kFecLenPrefix) return std::nullopt;
+    // Chặn cả cận trên như ParseVideoPacket: parity ngắn hơn mảnh dữ liệu của nhóm
+    // sẽ làm phép XOR ngược trong TryRecover ghi ra ngoài vector khôi phục.
+    if (payload.size() > kFecHeaderSize + kFecLenPrefix + kMaxVideoPayload)
+        return std::nullopt;
     const uint8_t* p = payload.data();
     FecPacketView v;
     v.hdr.frameId = GetU32(p);
@@ -429,8 +485,9 @@ std::optional<FecPacketView> ParseFecPacket(const CommonHeader& h,
     v.idr = (h.flags & kVideoFlagIdr) != 0;
     v.parity = payload.subspan(kFecHeaderSize);
     if (v.hdr.pktCount == 0) return std::nullopt;
-    // Nhóm phải nằm trong frame, không thì parity không phủ gói nào.
-    if (size_t(v.hdr.groupIndex) * kFecGroupSize >= v.hdr.pktCount) return std::nullopt;
+    // groupIndex phải nhỏ hơn số nhóm xen kẽ, không thì nó không phủ gói nào.
+    const size_t numGroups = (size_t(v.hdr.pktCount) + kFecGroupSize - 1) / kFecGroupSize;
+    if (v.hdr.groupIndex >= numGroups) return std::nullopt;
     return v;
 }
 

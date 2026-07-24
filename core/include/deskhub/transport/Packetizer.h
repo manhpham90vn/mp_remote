@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <functional>
 #include <span>
+#include <vector>
 
 namespace deskhub {
 
@@ -50,8 +51,8 @@ public:
         return sessionId_;
     }
 
-    // GĐ5: bật/tắt gói parity FEC (mặc định TẮT). Chi phí 1/kFecGroupSize băng thông
-    // nên chỉ bật khi đường truyền đang thực sự mất gói — Agent bật/tắt theo FEEDBACK.
+    // GĐ5: bật/tắt gói parity FEC XEN KẼ (mặc định TẮT). Chi phí 1/kFecGroupSize băng
+    // thông nên chỉ bật khi đường truyền đang thực sự mất gói — Agent bật/tắt theo FEEDBACK.
     void SetFecEnabled(bool on) {
         fec_ = on;
     }
@@ -66,12 +67,18 @@ public:
     size_t SendFrame(std::span<const uint8_t> nal, uint32_t frameId, uint64_t timestampUs,
         bool idr, const SendFn& send);
 
+    // Sải bước một bộ tích luỹ parity: 2 byte lenXor + dữ liệu XOR đệm 0 tới hết nhóm.
+    static constexpr size_t kParityStride = kFecLenPrefix + kMaxVideoPayload;
+
 private:
     uint32_t sessionId_ = 0;
     bool fec_ = false;
     uint8_t buf_[kMaxDatagram] = {};
-    // Tích lũy XOR của nhóm hiện tại: 2 byte lenXor + dữ liệu, đệm 0 tới hết nhóm.
-    uint8_t parity_[kFecLenPrefix + kMaxVideoPayload] = {};
+    // Nhóm xen kẽ: gói thứ i thuộc nhóm (i % numGroups), nên các nhóm chỉ đóng lại ở
+    // CUỐI frame → phải giữ numGroups bộ tích luỹ song song, mỗi bộ kParityStride byte.
+    // Là vector (không mảng cố định) vì numGroups phụ thuộc cỡ frame; assign() tái dùng
+    // sức chứa nên đường nóng chỉ cấp phát khi gặp frame lớn hơn mọi frame trước đó.
+    std::vector<uint8_t> parity_;
 };
 
 } // namespace deskhub

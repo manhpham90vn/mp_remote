@@ -417,6 +417,17 @@ void StreamRecvLoop(ClientStream& s, const ClientOptions& opt, ID3D11Device* dev
         if (decodeFailedFlag.exchange(false, std::memory_order_acq_rel)) requestKf("dec_fail");
         if (queueOverflowFlag.exchange(false, std::memory_order_acq_rel)) requestKf("q_overflow");
 
+        // GĐ7: xin host gửi lại các mảnh còn thiếu của frame đầu hàng (NACK). Bù cho
+        // FEC khi chùm mất vượt sức parity mà RTT còn đủ nhỏ để gói gửi lại về kịp hạn
+        // ghép. PlanNack tự điều tiết (chờ gói đảo thứ tự, không xin lại quá dày).
+        if (reasm) {
+            uint16_t nackIdx[64];
+            uint32_t nackFrame = 0;
+            const size_t nn = reasm->PlanNack(now, minRttUs.load(std::memory_order_relaxed),
+                nackFrame, nackIdx);
+            if (nn) session.SendNack(nackFrame, std::span<const uint16_t>(nackIdx, nn));
+        }
+
         // Vét input do luồng Main gom được -> ClientSession đánh seq, Tick gửi.
         {
             std::vector<deskhub::InputEvent> batch;

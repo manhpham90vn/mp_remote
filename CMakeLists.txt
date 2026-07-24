@@ -10,6 +10,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# Bật testing Ở GỐC trước khi vào core/: nếu không, add_test của core (được đăng ký
+# trong subdir) không được CTestTestfile.cmake ở gốc trỏ tới, và `ctest --test-dir
+# out/build/x64-debug` báo "No tests were found". Có dòng này thì ctest chạy từ thư
+# mục build gốc thấy được core_tests.
+enable_testing()
+
 add_subdirectory(core)
 add_subdirectory(platform)
 if(WIN32)

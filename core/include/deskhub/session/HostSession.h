@@ -72,6 +72,14 @@ struct HostCallbacks {
     // được nguồn nào host đang để foreground. Caller kéo cửa sổ nguồn lên trước khi
     // true, nhả phím đang giữ khi false.
     std::function<void(bool focused)> onFocus;
+    // NACK (GĐ7): client xin gửi lại các mảnh `indices` của `frameId`. Caller tra
+    // RetransmitCache rồi phát lại đúng các datagram đó. `indices` chỉ hợp lệ trong
+    // lúc callback chạy (trỏ vào bộ đệm stack) — chép ra nếu cần giữ.
+    std::function<void(uint32_t frameId, std::span<const uint16_t> indices)> onNack;
+    // INVALIDATE_REF (GĐ7): client đã bỏ hẳn `frameId`. Caller bảo encoder đừng tham
+    // chiếu frame đó nữa (NvEncInvalidateRefFrames) để phục hồi bằng P-frame rẻ thay
+    // vì IDR nặng; encoder không làm được thì đành force IDR như cũ.
+    std::function<void(uint32_t frameId)> onInvalidateRef;
 };
 
 class HostSession {
